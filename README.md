@@ -5,6 +5,8 @@ double billing, no lost usage after an outage, and a daily reconciliation.
 
 > Work in progress. See `docs/decisions.md` for every behaviour choice.
 
+> **Picking this up?** Start with [HANDOVER.md](HANDOVER.md): how to run it, how to check it works, and where Steps 9–14 plug in.
+
 ## Quick start (development)
 
 ```bash
@@ -29,6 +31,8 @@ python scripts/smoke_traffic.py    # sends sample traffic -> usage rows
 exporter peek                      # shows the usage rows the exporter can read
 exporter dry-run                   # shows what WOULD be sent to Lago (sends nothing)
 exporter send-row <id>             # sends ONE row's events to Lago (testing; safe to repeat)
+exporter run                       # the exporter itself: every 10 s, Ctrl+C to stop
+exporter run --once                # one cycle, then exit
 ```
 
 **Lago** (cloned next to this repo, pinned to v1.53.0):
@@ -73,7 +77,7 @@ next through them.
 | 5 | Reader | ✅ |
 | 6 | Mapper + event builder | ✅ |
 | 7 | Lago client + sender | ✅ |
-| 8 | Runner + HANDOVER.md | ⬜ |
+| 8 | Runner + HANDOVER.md | ✅ |
 | 9 | Backfill | ⬜ |
 | 10 | Reconciliation | ⬜ |
 | 11 | Status page, metrics, health | ⬜ |

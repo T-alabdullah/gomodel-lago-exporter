@@ -103,9 +103,43 @@ def _fail(message: str) -> int:
 
 
 @app.command()
-def run() -> None:
-    """Run the export loop. (Step 8)"""
-    raise typer.Exit(_not_yet("run", 8))
+def run(once: bool = typer.Option(False, "--once", help="Run one cycle and exit.")) -> None:
+    """Run the export loop (Ctrl+C to stop)."""
+    import logging
+
+    from exporter.lago_client import LagoAuthError, LagoClient
+    from exporter.reader import UsageReader
+    from exporter.runner import Runner
+    from exporter.sender import Sender
+    from exporter.state.store import StateStore
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)   # don't log every HTTP request
+    settings = get_settings()
+    with StateStore(settings.state_db_url) as store:
+        store.init_schema()
+
+    client = LagoClient(settings.lago_api_url, settings.lago_api_key.get_secret_value(),
+                        settings.http_timeout_seconds)
+    runner = Runner(
+        settings,
+        open_store=lambda: StateStore(settings.state_db_url),
+        reader=UsageReader(settings.gomodel_db_url),
+        sender=Sender(client, settings),
+    )
+    try:
+        if once:
+            print(runner.run_cycle().summary())
+        else:
+            logging.info("exporter running; one cycle every %ss (Ctrl+C to stop)",
+                         settings.poll_interval_seconds)
+            runner.run_forever()
+    except LagoAuthError as err:
+        raise typer.Exit(_fail(str(err)))
+    except KeyboardInterrupt:
+        logging.info("stopped")
+    finally:
+        client.close()
 
 
 @app.command()
