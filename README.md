@@ -22,6 +22,7 @@ exporter config
 
 ```bash
 docker compose up -d
+exporter init-db                   # creates the exporter's own tables (cursor, rows, dead letters)
 python scripts/gomodel_setup.py    # creates the test API keys (acme, beta, ghost)
 python scripts/smoke_traffic.py    # sends sample traffic -> usage rows
 ```
@@ -64,7 +65,7 @@ next through them.
 | 1 | Repo skeleton, config, contracts | ✅ |
 | 2 | GoModel environment | ✅ |
 | 3 | Lago environment + bootstrap | ✅ |
-| 4 | State DB | ⬜ |
+| 4 | State DB | ✅ |
 | 5 | Reader | ⬜ |
 | 6 | Mapper + event builder | ⬜ |
 | 7 | Lago client + sender | ⬜ |

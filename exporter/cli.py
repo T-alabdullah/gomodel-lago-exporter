@@ -16,6 +16,17 @@ def config() -> None:
     print(json.dumps(settings.model_dump(mode="json"), indent=2))
 
 
+@app.command("init-db")
+def init_db() -> None:
+    """Create the exporter's tables (safe to run again)."""
+    from exporter.state.store import StateStore
+
+    with StateStore(get_settings().state_db_url) as store:
+        store.init_schema()
+        counts = store.status_counts()
+    print("State database ready.", counts)
+
+
 @app.command()
 def run() -> None:
     """Run the export loop. (Step 8)"""

@@ -26,5 +26,8 @@ exporter = "exporter.cli:app"
 [tool.setuptools.packages.find]
 include = ["exporter*"]
 
+[tool.setuptools.package-data]
+exporter = ["state/*.sql"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
