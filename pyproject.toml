@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gomodel-lago-exporter"
+version = "0.1.0"
+description = "Exports GoModel usage to Lago as billable events"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic-settings>=2.7",
+    "psycopg[binary]>=3.2",
+    "httpx>=0.27",
+    "typer>=0.12",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "prometheus-client>=0.20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+exporter = "exporter.cli:app"
+
+[tool.setuptools.packages.find]
+include = ["exporter*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
