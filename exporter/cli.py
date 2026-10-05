@@ -28,6 +28,22 @@ def init_db() -> None:
 
 
 @app.command()
+def peek(limit: int = 20) -> None:
+    """Print the oldest LIMIT usage rows the reader can see in GoModel."""
+    from exporter.reader import UsageReader
+
+    rows = UsageReader(get_settings().gomodel_db_url).read_after(None, limit)
+    print(f"{'timestamp (UTC)':23} {'id':8} {'provider':11} {'user_path':20} "
+          f"{'labels':18} {'in':>5} {'out':>5} cache")
+    for r in rows:
+        print(f"{r.timestamp.strftime('%Y-%m-%d %H:%M:%S.%f')[:23]:23} {r.id[:8]:8} "
+              f"{r.provider_name or '-':11} {r.user_path or '-':20} "
+              f"{','.join(r.labels) or '-':18} {r.input_tokens:>5} {r.output_tokens:>5} "
+              f"{r.cache_type or '-'}")
+    print(f"({len(rows)} rows)")
+
+
+@app.command()
 def run() -> None:
     """Run the export loop. (Step 8)"""
     raise typer.Exit(_not_yet("run", 8))

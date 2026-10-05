@@ -23,8 +23,10 @@ exporter config
 ```bash
 docker compose up -d
 exporter init-db                   # creates the exporter's own tables (cursor, rows, dead letters)
+docker compose exec -T gomodel-db psql -U postgres -d gomodel < scripts/gomodel_readonly_role.sql   # read-only login for the exporter
 python scripts/gomodel_setup.py    # creates the test API keys (acme, beta, ghost)
 python scripts/smoke_traffic.py    # sends sample traffic -> usage rows
+exporter peek                      # shows the usage rows the exporter can read
 ```
 
 **Lago** (cloned next to this repo, pinned to v1.53.0):
@@ -66,7 +68,7 @@ next through them.
 | 2 | GoModel environment | ✅ |
 | 3 | Lago environment + bootstrap | ✅ |
 | 4 | State DB | ✅ |
-| 5 | Reader | ⬜ |
+| 5 | Reader | ✅ |
 | 6 | Mapper + event builder | ⬜ |
 | 7 | Lago client + sender | ⬜ |
 | 8 | Runner + HANDOVER.md | ⬜ |
