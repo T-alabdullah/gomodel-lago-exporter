@@ -18,6 +18,7 @@ Usage:
 import json
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -135,6 +136,16 @@ def upsert_plan(client: httpx.Client, pricing: dict, metrics: list[tuple[dict, d
         print(f"  plan {code}: updated")
 
 
+def start_of_month_utc() -> str:
+    """Midnight UTC on the 1st of this month, e.g. '2026-10-01T00:00:00Z'.
+
+    Lago never bills usage from before a subscription started (decisions.md R4),
+    so test subscriptions are back-dated to cover all of this month's test traffic.
+    """
+    first = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return first.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def upsert_customer_and_subscription(client: httpx.Client, customer: dict, pricing: dict) -> None:
     check(client.post("/api/v1/customers", json={"customer": {
         "external_id": customer["external_id"],
@@ -152,6 +163,7 @@ def upsert_customer_and_subscription(client: httpx.Client, customer: dict, prici
         "plan_code": pricing["plan"]["code"],
         "external_id": sub_id,
         "billing_time": "calendar",
+        "subscription_at": start_of_month_utc(),
     }}), f"create subscription {sub_id}")
     print(f"  subscription {sub_id}: created")
 

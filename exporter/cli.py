@@ -69,6 +69,39 @@ def dry_run(limit: int = 50) -> None:
           f"{totals[MappingOutcome.UNMAPPED]} unmapped. Nothing was sent.")
 
 
+@app.command("send-row")
+def send_row(row_id_prefix: str) -> None:
+    """Send ONE usage row's events to Lago (for testing; safe to repeat)."""
+    from exporter.contracts import MappingOutcome
+    from exporter.events import build_events
+    from exporter.lago_client import LagoClient
+    from exporter.mapper import map_row
+    from exporter.reader import UsageReader
+    from exporter.sender import Sender
+
+    settings = get_settings()
+    rows = UsageReader(settings.gomodel_db_url).read_after(None, 10_000)
+    matches = [r for r in rows if r.id.startswith(row_id_prefix)]
+    if len(matches) != 1:
+        raise typer.Exit(_fail(f"{len(matches)} rows match {row_id_prefix!r}; give a longer prefix."))
+    result = map_row(matches[0], settings)
+    if result.outcome is not MappingOutcome.MAPPED:
+        raise typer.Exit(_fail(f"Row is {result.outcome.value}: {result.reason}. Nothing to send."))
+
+    client = LagoClient(settings.lago_api_url, settings.lago_api_key.get_secret_value(),
+                        settings.http_timeout_seconds)
+    try:
+        for r in Sender(client, settings).send(build_events(result, settings)):
+            print(f"{r.event.transaction_id}  {r.outcome.value.upper()}  {r.error or ''}")
+    finally:
+        client.close()
+
+
+def _fail(message: str) -> int:
+    typer.echo(message, err=True)
+    return 1
+
+
 @app.command()
 def run() -> None:
     """Run the export loop. (Step 8)"""

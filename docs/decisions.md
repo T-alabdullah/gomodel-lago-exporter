@@ -38,6 +38,30 @@ Enforcing prepaid balances. GoModel's budgets handle limits at request time; thi
 
 **D3 detail:** GoModel stores `user_path = "/"` when none is set. That counts as "no user_path".
 
+**R3: Lago accepts events for unknown subscriptions and never bills them.**
+In Lago v1.53.0, ingestion doesn't check the subscription exists (`Events::CreateService`).
+The task doc says such events are rejected; they are not. **Mitigation:** the sender
+checks each subscription is active (`GET /api/v1/subscriptions/<id>`, cached 5 min)
+before sending; if not, the events are rejected on our side and go to the dead-letter table.
+
+**R4: Lago ignores usage from before a subscription started.**
+Lago only attaches an event to a subscription whose `started_at` is at or before the
+event's timestamp (`Events::PostProcessService`). Earlier events are accepted with no
+error but never billed (found on 5 Oct: usage at 07:44 UTC, subscription started 08:09).
+**Mitigation:** the sender compares each event's timestamp with the subscription's
+`started_at`, and rejects earlier ones to the dead-letter table with the reason.
+Test subscriptions are back-dated to the 1st of the month by `scripts/lago_setup.py`.
+
+**R5: Lago deduplicates per subscription, not globally.**
+The unique key is (organization, external_subscription_id, transaction_id). The same
+usage row sent to a *different* subscription would be billed again. **Rule:** once a row
+is sent, it must always go to the same subscription. Backfill (Step 9) must reuse
+`usage_rows.external_subscription_id` for rows already sent, even if the key's label changed.
+
+**Pricing note: package charges round up.** With the package model (size 1,000,000),
+Lago bills `ceil(units / 1,000,000)` packages on each charge's **monthly total**
+(`ChargeModels::PackageService`). 35 input + 3 output tokens cost $0.10 + $0.40 = $0.50.
+With real traffic the overcharge is at most one package per metric per model per month.
 
 ## Verified behaviour
 

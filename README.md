@@ -28,6 +28,7 @@ python scripts/gomodel_setup.py    # creates the test API keys (acme, beta, ghos
 python scripts/smoke_traffic.py    # sends sample traffic -> usage rows
 exporter peek                      # shows the usage rows the exporter can read
 exporter dry-run                   # shows what WOULD be sent to Lago (sends nothing)
+exporter send-row <id>             # sends ONE row's events to Lago (testing; safe to repeat)
 ```
 
 **Lago** (cloned next to this repo, pinned to v1.53.0):
@@ -71,7 +72,7 @@ next through them.
 | 4 | State DB | ✅ |
 | 5 | Reader | ✅ |
 | 6 | Mapper + event builder | ✅ |
-| 7 | Lago client + sender | ⬜ |
+| 7 | Lago client + sender | ✅ |
 | 8 | Runner + HANDOVER.md | ⬜ |
 | 9 | Backfill | ⬜ |
 | 10 | Reconciliation | ⬜ |
