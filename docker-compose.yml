@@ -1,0 +1,62 @@
+# Development stack. Step 2: GoModel side. Later steps add Lago and the exporter.
+name: gomodel-lago-exporter
+
+services:
+  # GoModel's own database. The exporter reads the `usage` table from here.
+  gomodel-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: gomodel
+      POSTGRES_DB: gomodel
+    ports: ["5433:5432"]
+    volumes:
+      - gomodel-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gomodel"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # Stands in for our vLLM servers.
+  ollama:
+    image: ollama/ollama
+    volumes:
+      - ollama-models:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 3s
+      timeout: 5s
+      retries: 30
+
+  # Downloads the test model once, then exits. The volume keeps it for next time.
+  ollama-pull:
+    image: ollama/ollama
+    depends_on:
+      ollama: { condition: service_healthy }
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["ollama", "pull", "qwen2.5:0.5b"]
+    restart: "no"
+
+  gomodel:
+    # Pinned on purpose: the exporter reads GoModel's own table, and GoModel
+    # migrates its schema on upgrade. Re-run the exporter's tests before bumping.
+    image: enterpilot/gomodel:${GOMODEL_VERSION:-0.1.99}
+    ports: ["8080:8080"]
+    depends_on:
+      gomodel-db: { condition: service_healthy }
+      ollama-pull: { condition: service_completed_successfully }
+    environment:
+      GOMODEL_MASTER_KEY: change-me
+      STORAGE_TYPE: postgresql
+      POSTGRES_URL: postgres://postgres:gomodel@gomodel-db:5432/gomodel
+      # Same Ollama registered twice -> providers "ollama-qai" and "ollama-ext"
+      OLLAMA_QAI_BASE_URL: http://ollama:11434/v1   # billable provider
+      OLLAMA_EXT_BASE_URL: http://ollama:11434/v1   # stands in for BYOK traffic (not billed)
+      # GoModel drops usage entries when this buffer is full (default 1000).
+      USAGE_BUFFER_SIZE: "10000"
+      USAGE_FLUSH_INTERVAL: "5"
+
+volumes:
+  gomodel-db-data:
+  ollama-models:

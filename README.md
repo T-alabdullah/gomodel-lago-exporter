@@ -8,7 +8,7 @@ double billing, no lost usage after an outage, and a daily reconciliation.
 ## Quick start (development)
 
 ```bash
-python3.12 -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 cp .env.example .env
@@ -30,7 +30,7 @@ next through them.
 | Step | Part | Status |
 |---|---|---|
 | 1 | Repo skeleton, config, contracts | ✅ |
-| 2 | GoModel environment | ⬜ |
+| 2 | GoModel environment | ✅ |
 | 3 | Lago environment + bootstrap | ⬜ |
 | 4 | State DB | ⬜ |
 | 5 | Reader | ⬜ |

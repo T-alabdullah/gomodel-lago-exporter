@@ -28,3 +28,12 @@ Changing a decision means changing config, not code.
 ## Out of scope
 
 Enforcing prepaid balances. GoModel's budgets handle limits at request time; this exporter only reports usage.
+
+
+## Known risks
+
+**R1: clients can set `user_path` on keys that don't have one bound.** GoModel takes `user_path` from the `X-GoModel-User-Path` request header when the API key has no bound user path. A key with neither a `lago:` label nor a bound user path could send `/customers/sub_beta` and be billed to beta (verified on GoModel 0.1.99). Keys with a bound user path ignore the header, and labelled keys are safe because the label is checked first. **Rule: every key for billable traffic must have a `lago:` label or a bound `user_path`.**
+
+**R2: GoModel deletes usage rows after 90 days** (`USAGE_RETENTION_DAYS`, default 90). Backfill and reconciliation cannot go further back than that.
+
+**D3 detail:** GoModel stores `user_path = "/"` when none is set. That counts as "no user_path".
