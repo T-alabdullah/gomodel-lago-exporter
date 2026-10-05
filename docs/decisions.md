@@ -37,3 +37,12 @@ Enforcing prepaid balances. GoModel's budgets handle limits at request time; thi
 **R2: GoModel deletes usage rows after 90 days** (`USAGE_RETENTION_DAYS`, default 90). Backfill and reconciliation cannot go further back than that.
 
 **D3 detail:** GoModel stores `user_path = "/"` when none is set. That counts as "no user_path".
+
+
+## Verified behaviour
+
+**Cached-token split matches GoModel (Step 6).** On real Ollama traffic (the same
+prompt repeated, so Ollama reused 34 of 35 prompt tokens), `exporter dry-run`
+produced 1 uncached + 34 cached input tokens per row, identical to GoModel's
+own split in `GET /admin/usage/log` (`uncached_input_tokens` / `cached_input_tokens`).
+Uncached + cached always equals `input_tokens`, so no token is billed twice.

@@ -43,6 +43,32 @@ def peek(limit: int = 20) -> None:
     print(f"({len(rows)} rows)")
 
 
+@app.command("dry-run")
+def dry_run(limit: int = 50) -> None:
+    """Show what the oldest LIMIT rows WOULD send to Lago. Sends nothing."""
+    from exporter.contracts import MappingOutcome
+    from exporter.events import build_events
+    from exporter.mapper import map_row
+    from exporter.reader import UsageReader
+
+    settings = get_settings()
+    rows = UsageReader(settings.gomodel_db_url).read_after(None, limit)
+    totals = {outcome: 0 for outcome in MappingOutcome}
+    event_count = 0
+    for row in rows:
+        result = map_row(row, settings)
+        totals[result.outcome] += 1
+        who = result.external_subscription_id or result.outcome.value.upper()
+        print(f"{row.id[:8]}  {row.provider_name or '-':11} -> {who}  ({result.reason})")
+        if result.outcome is MappingOutcome.MAPPED:
+            for event in build_events(result, settings):
+                event_count += 1
+                print(f"            {event.code:24} {event.tokens:>6}  {event.transaction_id}")
+    print(f"\n{len(rows)} rows: {totals[MappingOutcome.MAPPED]} mapped ({event_count} events), "
+          f"{totals[MappingOutcome.NOT_BILLABLE]} not billable, "
+          f"{totals[MappingOutcome.UNMAPPED]} unmapped. Nothing was sent.")
+
+
 @app.command()
 def run() -> None:
     """Run the export loop. (Step 8)"""
