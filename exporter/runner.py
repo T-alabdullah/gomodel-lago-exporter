@@ -89,23 +89,28 @@ class Runner:
     # --- One cycle --------------------------------------------------------
 
     def run_cycle(self) -> CycleReport:
+        with self._open_store() as store, store.writer_lock(), store.worker_run("export") as snapshot:
+            report = self._run_cycle(store)
+            snapshot.update(dataclasses.asdict(report))
+            return report
+
+    def _run_cycle(self, store: StateStore) -> CycleReport:
         report = CycleReport()
-        with self._open_store() as store, store.writer_lock():
-            report.cursor = store.get_cursor()
-            # Pending payloads survive source deletion and moving overlap windows.
-            pending_position = None
-            while pending := store.pending_deliveries(self._settings.read_batch_size, pending_position):
-                if self._process_page(store, [d.row for d in pending], report,
-                                      force=True, advance=False):
-                    return report
-                pending_position = pending[-1].row.id
-            position = overlap_start(report.cursor, self._settings.overlap_window_seconds)
-            while rows := self._reader.read_after(position, self._settings.read_batch_size):
-                must_stop = self._process_page(store, rows, report)
-                if must_stop:
-                    break                   # Lago trouble: try again next cycle
-                position = Cursor(rows[-1].timestamp, rows[-1].id)
-            report.cursor = store.get_cursor()
+        report.cursor = store.get_cursor()
+        # Pending payloads survive source deletion and moving overlap windows.
+        pending_position = None
+        while pending := store.pending_deliveries(self._settings.read_batch_size, pending_position):
+            if self._process_page(store, [d.row for d in pending], report,
+                                  force=True, advance=False):
+                return report
+            pending_position = pending[-1].row.id
+        position = overlap_start(report.cursor, self._settings.overlap_window_seconds)
+        while rows := self._reader.read_after(position, self._settings.read_batch_size):
+            must_stop = self._process_page(store, rows, report)
+            if must_stop:
+                break                   # Lago trouble: try again next cycle
+            position = Cursor(rows[-1].timestamp, rows[-1].id)
+        report.cursor = store.get_cursor()
         return report
 
     def backfill(self, start: datetime, end: datetime) -> CycleReport:

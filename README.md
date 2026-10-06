@@ -81,8 +81,8 @@ next through them.
 | 7 | Lago client + sender | ✅ |
 | 8 | Runner + HANDOVER.md | ✅ |
 | 9 | Backfill | ✅ takeover Step 1 |
-| 10 | Reconciliation | ⬜ |
-| 11 | Status page, metrics, health | ⬜ |
+| 10 | Reconciliation | ✅ takeover Step 2 |
+| 11 | Status page, metrics, health | ✅ takeover Step 2 |
 | 12 | Full test environment | ⬜ |
 | 13 | Failure tests | ⬜ |
 | 14 | README, runbook, presentation | ⬜ |
@@ -122,3 +122,24 @@ databases and reset their tables. Do not point them at production. Without `--re
 local unit tests can run while unavailable database tests skip; that is not a completed
 major-step gate. GitHub Actions runs the original baseline and expanded suite on
 PostgreSQL 16, forbids skips, checks dependencies and builds the distributable package.
+
+
+## Reconciliation and status
+
+```bash
+exporter init-db
+exporter serve                         # delivery + daily reconciliation + web status
+exporter reconcile                     # audit yesterday UTC on demand
+exporter reconcile --start 2026-10-05 --end 2026-10-06
+```
+
+Open http://127.0.0.1:8000 for the status page. `/status` returns JSON, `/metrics`
+exposes Prometheus metrics and `/health` returns readiness with alert reasons.
+`exporter run` remains delivery-only. A reconcile command exits 0 only for a matched
+report; a mismatch or incomplete result exits 1 and is saved for investigation.
+
+The audit compares exact-range events, then separately checks Lago's returned billing
+periods. It includes acknowledgements on partially failed rows and never equates a
+missing API response to zero usage. See [operations and repair](docs/operations.md)
+for scheduling, configuration, supported scopes, alerts and safe replay, and
+[Step 2 design and tests](docs/step-2-design.md) for the upstream contracts and evidence.

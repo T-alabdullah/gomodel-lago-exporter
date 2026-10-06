@@ -75,7 +75,16 @@ class Settings(BaseSettings):
 
     # --- Monitoring (decisions.md D5) --------------------------------------
     lag_alert_seconds: int = Field(default=900, ge=1)
-    status_port: int = 8000
+    status_port: int = Field(default=8000, ge=1, le=65535)
+    status_host: str = "127.0.0.1"
+    heartbeat_stale_seconds: int = Field(default=300, ge=1)
+    monitor_max_rows: int = Field(default=10000, ge=1)
+    reconciliation_delay_seconds: int = Field(default=900, ge=0)
+    reconciliation_retry_seconds: int = Field(default=300, ge=1)
+    reconciliation_lookback_days: int = Field(default=7, ge=1, le=90)
+    reconciliation_page_size: int = Field(default=100, ge=1, le=100)
+    reconciliation_max_pages: int = Field(default=10000, ge=1)
+    source_retention_days: int = Field(default=90, ge=1)
 
     @field_validator("billable_providers", "mapping_order", mode="before")
     @classmethod

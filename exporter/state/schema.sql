@@ -61,3 +61,31 @@ CREATE TABLE IF NOT EXISTS deliveries (
 );
 CREATE INDEX IF NOT EXISTS deliveries_pending_idx
     ON deliveries (usage_row_id) WHERE pending;
+
+CREATE TABLE IF NOT EXISTS event_acknowledgements (
+    usage_row_id UUID NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('in', 'cached', 'out')),
+    tokens BIGINT NOT NULL,
+    first_ack_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (usage_row_id, kind)
+);
+CREATE INDEX IF NOT EXISTS acknowledgement_time_idx ON event_acknowledgements(first_ack_at);
+
+CREATE TABLE IF NOT EXISTS worker_status (
+    name TEXT PRIMARY KEY,
+    started_at TIMESTAMPTZ NOT NULL,
+    finished_at TIMESTAMPTZ,
+    succeeded BOOLEAN,
+    last_error TEXT,
+    report JSONB NOT NULL DEFAULT '{}'::jsonb
+);
+
+CREATE TABLE IF NOT EXISTS reconciliation_runs (
+    id BIGSERIAL PRIMARY KEY,
+    period_start TIMESTAMPTZ NOT NULL,
+    period_end TIMESTAMPTZ NOT NULL,
+    completed_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    status TEXT NOT NULL CHECK (status IN ('matched', 'mismatch', 'incomplete')),
+    report JSONB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS reconciliation_period_idx ON reconciliation_runs(period_start, period_end, completed_at DESC);

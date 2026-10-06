@@ -46,3 +46,26 @@ def test_successful_backfill_cli_passes_exact_boundaries(monkeypatch):
     result = CliRunner().invoke(app, ['backfill', '2026-10-05', '2026-10-06'])
     assert result.exit_code == 0
     assert calls == [(_parse_boundary('2026-10-05'), _parse_boundary('2026-10-06'))]
+
+
+@pytest.mark.parametrize('args', [
+    ['--start', '2026-10-05'], ['--end', '2026-10-06'],
+    ['--start', '2026-10-06', '--end', '2026-10-05'],
+    ['--start', '2026-10-05T00:00:00', '--end', '2026-10-06'],
+])
+def test_invalid_reconcile_range_fails_before_database_access(args):
+    result = CliRunner().invoke(app, ['reconcile', *args])
+    assert result.exit_code == 2
+
+
+@pytest.mark.parametrize('status,exit_code', [('matched', 0), ('mismatch', 1), ('incomplete', 1)])
+def test_reconcile_exit_codes(monkeypatch, status, exit_code):
+    import exporter.cli as cli
+    from types import SimpleNamespace
+    closed = []
+    reconciler = SimpleNamespace(run=lambda start, end: {'status': status})
+    client = SimpleNamespace(close=lambda: closed.append(True))
+    monkeypatch.setattr(cli, '_components', lambda: (None,None,None,client,reconciler))
+    result = CliRunner().invoke(app, ['reconcile', '--start', '2026-10-05', '--end', '2026-10-06'])
+    assert result.exit_code == exit_code
+    assert closed == [True]
