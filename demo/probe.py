@@ -10,10 +10,8 @@ import sys
 import uuid
 
 import psycopg
-from psycopg.types.json import Jsonb
 from exporter.cli import _components
 from exporter.contracts import MappingOutcome
-from exporter.delivery import Delivery
 from exporter.events import build_events
 from exporter.mapper import map_row
 from exporter.runner import Runner
@@ -62,6 +60,8 @@ def main(action):
             return {'verified_source_rows': len(source)}
         if action == 'audit':
             end = (now-timedelta(seconds=settings.reconciliation_delay_seconds+1)).replace(microsecond=0)
+            if len(sys.argv) == 4:
+                start, end = map(datetime.fromisoformat, sys.argv[2:4])
             return reconciler.run(start, end)
         if action == 'cycle':
             return vars(runner.run_cycle())
@@ -93,14 +93,6 @@ def main(action):
                     (row_id, 'acceptance-'+row_id, timestamp))
                 assert result.rowcount == 1
                 return {'row_id': row_id, 'timestamp': timestamp}
-        if action == 'repair-event':
-            row_id, kind = sys.argv[2].split(':')
-            with psycopg.connect(settings.state_db_url) as conn:
-                record = conn.execute('SELECT payload FROM deliveries WHERE usage_row_id=%s', (row_id,)).fetchone()
-            event = next(e for e in Delivery.from_dict(record[0]).events if e.kind.value == kind)
-            response = client.post_one(event)
-            response.raise_for_status()
-            return {'restored': event.transaction_id}
         raise ValueError(action)
     finally:
         client.close()

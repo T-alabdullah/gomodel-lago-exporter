@@ -1,7 +1,7 @@
 name: Real-stack acceptance
 on:
   push:
-    branches: [codex/complete-acceptance]
+    branches: [main, codex/complete-acceptance]
   pull_request:
   workflow_dispatch:
 permissions:
@@ -20,6 +20,9 @@ jobs:
           docker compose --env-file .env.demo up -d --build --wait --wait-timeout 600
       - name: Acceptance scenarios
         run: python3 demo/acceptance.py
+      - name: Record resolved image identities
+        if: always()
+        run: docker image ls --digests --no-trunc > image-identities.txt
       - name: Container logs
         if: always()
         run: docker compose --env-file .env.demo logs --no-color > compose-logs.txt
@@ -30,6 +33,7 @@ jobs:
           path: |
             acceptance-results.json
             compose-logs.txt
+            image-identities.txt
       - name: Clean up this ephemeral CI stack
         if: always()
         run: docker compose --env-file .env.demo down -v

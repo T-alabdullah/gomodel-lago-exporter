@@ -72,7 +72,8 @@ def audit_matched():
 
 def main():
     # A fresh stack is mandatory: never mutate an existing deployment silently.
-    assert probe('snapshot')['source_rows'] == 0, 'Acceptance requires empty demo volumes'
+    initial = probe('snapshot')
+    assert initial['source_rows'] == initial['remote_events'] == initial['acknowledgements'] == 0 and not initial['counts'], 'Acceptance requires empty demo volumes'
     compose('run', '--rm', '--no-deps', 'bootstrap')
     record('bootstrap-rerun-and-readonly-schema-contract')
 
@@ -81,15 +82,23 @@ def main():
     assert snap['unmapped'] == rows//6 and snap['excluded'] == rows//2, snap
     assert snap['dead_letters'] == snap['unmapped'], snap
     probe('verify')
+    with urllib.request.urlopen('http://127.0.0.1:8000/status') as response:
+        visible = json.load(response)
+    assert visible['counts']['dead_letters_open'] == snap['unmapped']
+    with urllib.request.urlopen('http://127.0.0.1:8000/') as response:
+        page = response.read().decode()
+    assert visible['dead_letters'][0]['usage_row_id'] in page and 'unmapped' in page
     compose('stop', 'exporter')
     time.sleep(4)
     report = probe('audit')
     assert report['status'] == 'mismatch' and any(i['code'] == 'unmapped' for i in report['issues']), report
+    unmapped_period = (report['start'], report['end'])
     record('mixed-traffic-streaming-cache-and-unmapped', requests=rows, snapshot=snap)
     fixed = probe('fix-ghost')
     assert fixed['repaired_rows'] == rows//6, fixed
     probe('backfill')
     report = audit_matched()
+    assert probe('audit', *unmapped_period)['status'] == 'matched'
     record('repair-unmapped-and-three-way-zero-difference', report=report)
 
     before = probe('snapshot')
@@ -149,8 +158,9 @@ def main():
     assert report['status'] == 'mismatch', report
     assert any(i['code'] == 'missing_lago_event' and tx.split(':')[0] in i['row_ids'] for i in report['issues']), report
     record('deleted-real-lago-event-detected', transaction_id=tx, report=report)
-    probe('repair-event', tx)
+    probe('backfill')
     audit_matched()
+    assert probe('audit', report['start'], report['end'])['status'] == 'matched'
     record('deleted-event-restored-zero-difference')
 
     # Recreate services with all volumes retained, then check stable identities/counts.
@@ -165,6 +175,8 @@ def main():
         assert b'exporter_' in response.read()
     with urllib.request.urlopen('http://127.0.0.1:8000/') as response:
         assert b'<html' in response.read().lower()
+    with urllib.request.urlopen('http://127.0.0.1:8000/health') as response:
+        assert json.load(response)['healthy'] is True
     record('persistent-restart-and-status-endpoints', final_snapshot=after, status=status)
     print('All real-stack acceptance scenarios passed.', flush=True)
 

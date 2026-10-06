@@ -13,3 +13,4 @@ htmlcov/
 .demo/
 acceptance-results.json
 compose-logs.txt
+image-identities.txt
