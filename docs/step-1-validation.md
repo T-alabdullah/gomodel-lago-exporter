@@ -1,11 +1,21 @@
 # Step 1 validation
 
-The first full PostgreSQL run passed on GitHub Actions:
-[run 37429145942](https://github.com/T-alabdullah/gomodel-lago-exporter/actions/runs/37429145942).
-It independently ran the unmodified `3452566` baseline (**76 passed**) and the expanded
-suite (**113 passed**), with **zero skipped tests**. The final revision adds stronger
-restricted-login coverage, migration-acknowledgement regressions and CLI coverage;
-its result will be recorded here after its gate completes.
+**Step 1 gate passed.** Final implementation `8bbce9c` was verified in
+[GitHub Actions run 37429686497](https://github.com/T-alabdullah/gomodel-lago-exporter/actions/runs/37429686497):
+
+| Check | Result |
+| --- | --- |
+| Unmodified teammate baseline at `3452566` | 76 passed, zero skipped |
+| Expanded suite | 116 passed, zero skipped |
+| Dependency consistency | `pip check` passed |
+| Distribution packaging | Source archive and wheel built successfully |
+| Python source compilation | Passed |
+| Whitespace/diff check | Passed locally |
+
+There are 40 additional tests beyond the handover baseline. The earlier expanded
+revision also passed 113 tests; final coverage strengthens restricted-login access,
+legacy acknowledgements and CLI behavior. Subsequent changes to this validation
+record are documentation only.
 
 The no-skips gate is `.github/workflows/tests.yml`: Ubuntu, Python 3.12 and PostgreSQL
 16. Dependencies are installed into the runner, the original baseline is extracted

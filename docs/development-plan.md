@@ -7,6 +7,8 @@ before starting the next. A skipped database test is not a passing gate.
 
 ## 1. Durable delivery and safe backfill
 
+**Complete:** 116 tests passed with no skips; see [validation](step-1-validation.md).
+
 - Review all original files, eight commits, requirements and pinned upstream contracts.
 - Save immutable subscription and complete event payloads before HTTP; retain pending
   work outside the overlap window and after source deletion.
