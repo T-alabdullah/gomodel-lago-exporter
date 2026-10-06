@@ -1,0 +1,12 @@
+.git
+.venv
+.env*
+.gomodel-keys.json
+.demo
+__pycache__
+.pytest_cache
+build
+dist
+*.egg-info
+tests
+docs

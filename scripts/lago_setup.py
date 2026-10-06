@@ -74,7 +74,10 @@ def upsert_metric(client: httpx.Client, spec: dict, models: list[str]) -> dict:
         "recurring": False,
         "filters": [{"key": "model", "values": models}],
     }}
-    if client.get(f"/api/v1/billable_metrics/{spec['code']}").status_code == 404:
+    existing = client.get(f"/api/v1/billable_metrics/{spec['code']}")
+    if existing.status_code not in (200, 404):
+        check(existing, f"inspect metric {spec['code']}")
+    if existing.status_code == 404:
         data = check(client.post("/api/v1/billable_metrics", json=body), f"create metric {spec['code']}")
         print(f"  metric {spec['code']}: created")
     else:
@@ -92,6 +95,8 @@ def upsert_plan(client: httpx.Client, pricing: dict, metrics: list[tuple[dict, d
     code = pricing["plan"]["code"]
     size = pricing["package_size"]
     existing = client.get(f"/api/v1/plans/{code}")
+    if existing.status_code not in (200, 404):
+        check(existing, f"inspect plan {code}")
     # Lago matches charges on update by their id, so look up the existing ones.
     charge_ids = {}
     if existing.status_code == 200:
@@ -155,7 +160,10 @@ def upsert_customer_and_subscription(client: httpx.Client, customer: dict, prici
     print(f"  customer {customer['external_id']}: ok")
 
     sub_id = customer["subscription_id"]
-    if client.get(f"/api/v1/subscriptions/{sub_id}").status_code == 200:
+    existing = client.get(f"/api/v1/subscriptions/{sub_id}")
+    if existing.status_code not in (200, 404):
+        check(existing, f"inspect subscription {sub_id}")
+    if existing.status_code == 200:
         print(f"  subscription {sub_id}: already active")
         return
     check(client.post("/api/v1/subscriptions", json={"subscription": {
@@ -172,7 +180,7 @@ def main() -> None:
     settings = get_settings()
     api_key = settings.lago_api_key.get_secret_value()
     if not api_key:
-        sys.exit("EXPORTER_LAGO_API_KEY is empty in .env (see Step 3.5).")
+        sys.exit("EXPORTER_LAGO_API_KEY is empty; configure the target Lago organization API key.")
     pricing = json.loads(PRICING_FILE.read_text())
     models = list(pricing["prices_per_million_tokens"])
 

@@ -15,7 +15,7 @@ from pathlib import Path
 import httpx
 
 GOMODEL_URL = os.environ.get("GOMODEL_URL", "http://localhost:8080")
-MODEL = os.environ.get("SMOKE_MODEL", "qwen2.5:0.5b")
+MODEL = os.environ.get("SMOKE_MODEL", "demo-small")
 KEYS_FILE = Path(__file__).resolve().parent.parent / ".gomodel-keys.json"
 
 REQUESTS = [

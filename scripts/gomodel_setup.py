@@ -17,13 +17,14 @@ import json
 import os
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 import httpx
 
 GOMODEL_URL = os.environ.get("GOMODEL_URL", "http://localhost:8080")
 MASTER_KEY = os.environ.get("GOMODEL_MASTER_KEY", "change-me")
-KEYS_FILE = Path(__file__).resolve().parent.parent / ".gomodel-keys.json"
+KEYS_FILE = Path(os.environ.get("GOMODEL_KEYS_FILE", str(Path(__file__).resolve().parent.parent / ".gomodel-keys.json")))
 
 TEST_KEYS = [
     {"name": "acme", "labels": ["lago:sub_acme"]},
@@ -62,13 +63,19 @@ def main() -> None:
             if name in existing:
                 print(f"  {name}: exists in GoModel but its secret was not saved here.")
                 print(f"         Deactivate it in the dashboard and run this script again.")
-                continue
+                raise RuntimeError("Existing GoModel key has no saved secret; restore the keys volume or rotate it explicitly.")
             created = client.post("/admin/auth-keys", json=spec)
             created.raise_for_status()
             saved[name] = created.json()["value"]
             print(f"  {name}: created")
 
-    KEYS_FILE.write_text(json.dumps(saved, indent=2) + "\n")
+            KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with tempfile.NamedTemporaryFile(mode="w", dir=KEYS_FILE.parent, delete=False) as out:
+                out.write(json.dumps(saved, indent=2) + "\n")
+                out.flush()
+                os.fsync(out.fileno())
+                temporary = Path(out.name)
+            os.replace(temporary, KEYS_FILE)
     print(f"Secrets saved to {KEYS_FILE.name}")
 
 

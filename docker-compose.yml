@@ -1,79 +1,223 @@
-# Development stack: GoModel side + the exporter's own database.
-# Lago runs separately for now (see README: "Running the dev stack").
 name: gomodel-lago-exporter
 
+x-lago-env: &lago-env
+  DATABASE_URL: postgresql://lago:${LAGO_PASSWORD:?Run python3 scripts/init_demo.py}@lago-db:5432/lago
+  REDIS_URL: redis://lago-redis:6379
+  LAGO_REDIS_CACHE_URL: redis://lago-redis:6379
+  SECRET_KEY_BASE: ${SECRET_KEY_BASE:?Run python3 scripts/init_demo.py}
+  RAILS_ENV: production
+  RAILS_LOG_TO_STDOUT: "true"
+  LAGO_RSA_PRIVATE_KEY: ${LAGO_RSA_PRIVATE_KEY:?Run python3 scripts/init_demo.py}
+  LAGO_ENCRYPTION_PRIMARY_KEY: ${LAGO_ENCRYPTION_PRIMARY_KEY:?}
+  LAGO_ENCRYPTION_DETERMINISTIC_KEY: ${LAGO_ENCRYPTION_DETERMINISTIC_KEY:?}
+  LAGO_ENCRYPTION_KEY_DERIVATION_SALT: ${LAGO_ENCRYPTION_KEY_DERIVATION_SALT:?}
+  LAGO_API_URL: http://localhost:3000
+  LAGO_FRONT_URL: http://localhost:8081
+  LAGO_DISABLE_SEGMENT: "true"
+  LAGO_DISABLE_PDF_GENERATION: "true"
+  LAGO_DISABLE_SIGNUP: "true"
+  LAGO_CREATE_ORG: "true"
+  LAGO_ORG_NAME: Exporter Demo
+  LAGO_ORG_USER_EMAIL: demo@example.test
+  LAGO_ORG_USER_PASSWORD: ${LAGO_ORG_USER_PASSWORD:?}
+  LAGO_ORG_API_KEY: ${LAGO_ORG_API_KEY:?}
+  RAILS_MAX_THREADS: "3"
+  SIDEKIQ_CONCURRENCY: "3"
+
+x-exporter-env: &exporter-env
+  EXPORTER_GOMODEL_DB_URL: postgresql://exporter_ro:${READONLY_PASSWORD:?}@gomodel-db:5432/gomodel
+  EXPORTER_STATE_DB_URL: postgresql://postgres:${EXPORTER_PASSWORD:?}@exporter-db:5432/exporter
+  EXPORTER_LAGO_API_URL: http://lago-api:3000
+  EXPORTER_LAGO_API_KEY: ${LAGO_ORG_API_KEY:?}
+  EXPORTER_BILLABLE_PROVIDERS: ollama-qai
+  EXPORTER_STATUS_HOST: 0.0.0.0
+  EXPORTER_POLL_INTERVAL_SECONDS: "2"
+  EXPORTER_MAX_RETRIES: "2"
+  # Short grace only for this deterministic demo; production default is 900s.
+  EXPORTER_RECONCILIATION_DELAY_SECONDS: "2"
+  GOMODEL_URL: http://gomodel:8080
+  GOMODEL_MASTER_KEY: ${GOMODEL_MASTER_KEY:?}
+  GOMODEL_KEYS_FILE: /secrets/gomodel-keys.json
+
 services:
-  # GoModel's own database. The exporter reads the `usage` table from here.
   gomodel-db:
-    image: postgres:16
+    image: postgres:16.10-bookworm
     environment:
-      POSTGRES_PASSWORD: gomodel
+      POSTGRES_PASSWORD: ${GOMODEL_PASSWORD:?}
       POSTGRES_DB: gomodel
-    ports: ["5433:5432"]
-    volumes:
-      - gomodel-db-data:/var/lib/postgresql/data
+    volumes: [gomodel-db-data:/var/lib/postgresql/data]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d gomodel"]
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d gomodel"]
       interval: 2s
       timeout: 3s
-      retries: 30
+      retries: 60
 
-  # Stands in for our vLLM servers.
-  ollama:
-    image: ollama/ollama
-    volumes:
-      - ollama-models:/root/.ollama
-    healthcheck:
-      test: ["CMD", "ollama", "list"]
-      interval: 3s
-      timeout: 5s
-      retries: 30
-
-  # Downloads the test model once, then exits. The volume keeps it for next time.
-  ollama-pull:
-    image: ollama/ollama
-    depends_on:
-      ollama: { condition: service_healthy }
+  exporter-db:
+    image: postgres:16.10-bookworm
     environment:
-      OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["ollama", "pull", "qwen2.5:0.5b"]
-    restart: "no"
+      POSTGRES_PASSWORD: ${EXPORTER_PASSWORD:?}
+      POSTGRES_DB: exporter
+    volumes: [exporter-db-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U postgres -d exporter"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  mock-provider:
+    build: .
+    image: gomodel-exporter:local
+    command: [uvicorn, demo.mock_provider:app, --host, 0.0.0.0, --port, "8080"]
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
 
   gomodel:
-    # Pinned on purpose: the exporter reads GoModel's own table, and GoModel
-    # migrates its schema on upgrade. Re-run the exporter's tests before bumping.
-    image: enterpilot/gomodel:${GOMODEL_VERSION:-0.1.99}
-    ports: ["8080:8080"]
+    image: enterpilot/gomodel:0.1.99
+    ports: ["127.0.0.1:8080:8080"]
     depends_on:
-      gomodel-db: { condition: service_healthy }
-      ollama-pull: { condition: service_completed_successfully }
+      gomodel-db: {condition: service_healthy}
+      mock-provider: {condition: service_healthy}
     environment:
-      GOMODEL_MASTER_KEY: change-me
+      GOMODEL_MASTER_KEY: ${GOMODEL_MASTER_KEY:?}
       STORAGE_TYPE: postgresql
-      POSTGRES_URL: postgres://postgres:gomodel@gomodel-db:5432/gomodel
-      # Same Ollama registered twice -> providers "ollama-qai" and "ollama-ext"
-      OLLAMA_QAI_BASE_URL: http://ollama:11434/v1   # billable provider
-      OLLAMA_EXT_BASE_URL: http://ollama:11434/v1   # stands in for BYOK traffic (not billed)
-      # GoModel drops usage entries when this buffer is full (default 1000).
+      POSTGRES_URL: postgres://postgres:${GOMODEL_PASSWORD:?}@gomodel-db:5432/gomodel
+      OLLAMA_QAI_BASE_URL: http://mock-provider:8080/v1
+      OLLAMA_EXT_BASE_URL: http://mock-provider:8080/v1
       USAGE_BUFFER_SIZE: "10000"
-      USAGE_FLUSH_INTERVAL: "5"
-
-  # The exporter's own database: cursor, row status, dead letters (Step 4).
-  exporter-db:
-    image: postgres:16
-    environment:
-      POSTGRES_PASSWORD: exporter
-      POSTGRES_DB: exporter
-    ports: ["5434:5432"]
-    volumes:
-      - exporter-db-data:/var/lib/postgresql/data
+      USAGE_FLUSH_INTERVAL: "1"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d exporter"]
+      test: [CMD, /gomodel, --health]
+      interval: 3s
+      timeout: 5s
+      retries: 60
+
+  lago-db:
+    image: getlago/postgres-partman:15.0-alpine
+    environment:
+      POSTGRES_USER: lago
+      POSTGRES_PASSWORD: ${LAGO_PASSWORD:?}
+      POSTGRES_DB: lago
+    volumes: [lago-db-data:/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, "pg_isready -h 127.0.0.1 -U lago -d lago"]
       interval: 2s
       timeout: 3s
+      retries: 60
+
+  lago-redis:
+    image: redis:7.2.11-alpine
+    command: [redis-server, --appendonly, "yes"]
+    volumes: [lago-redis-data:/data]
+    healthcheck:
+      test: [CMD, redis-cli, ping]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+
+  lago-migrate:
+    image: getlago/api:v1.53.0
+    command: [./scripts/migrate.sh]
+    environment: *lago-env
+    depends_on:
+      lago-db: {condition: service_healthy}
+      lago-redis: {condition: service_healthy}
+
+  lago-api:
+    image: getlago/api:v1.53.0
+    command: [./scripts/start.api.sh]
+    environment: *lago-env
+    volumes: [lago-storage:/app/storage]
+    ports: ["127.0.0.1:3000:3000"]
+    depends_on:
+      lago-migrate: {condition: service_completed_successfully}
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:3000/health]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+
+  lago-worker:
+    image: getlago/api:v1.53.0
+    command: [./scripts/start.worker.sh]
+    environment: *lago-env
+    volumes: [lago-storage:/app/storage]
+    depends_on:
+      lago-api: {condition: service_healthy}
+    healthcheck:
+      test: [CMD, curl, -f, http://localhost:8080]
+      interval: 5s
+      timeout: 10s
+      retries: 60
+      start_period: 30s
+
+  lago-clock:
+    image: getlago/api:v1.53.0
+    command: [./scripts/start.clock.sh]
+    environment: *lago-env
+    depends_on:
+      lago-api: {condition: service_healthy}
+
+  lago-front:
+    image: getlago/front:v1.53.0
+    profiles: [ui]
+    environment:
+      API_URL: http://localhost:3000
+      APP_ENV: production
+      LAGO_DISABLE_PDF_GENERATION: "true"
+    ports: ["127.0.0.1:8081:80"]
+    depends_on:
+      lago-api: {condition: service_healthy}
+
+  bootstrap:
+    init: true
+    build: .
+    image: gomodel-exporter:local
+    # Only provisioning has source admin credentials; exporter never receives them.
+    user: root
+    command: [python, -m, demo.bootstrap]
+    environment:
+      <<: *exporter-env
+      GOMODEL_ADMIN_DB_URL: postgresql://postgres:${GOMODEL_PASSWORD:?}@gomodel-db:5432/gomodel
+      READONLY_PASSWORD: ${READONLY_PASSWORD:?}
+    volumes: [demo-secrets:/secrets]
+    depends_on:
+      gomodel: {condition: service_healthy}
+      lago-worker: {condition: service_healthy}
+      exporter-db: {condition: service_healthy}
+
+  exporter:
+    build: .
+    image: gomodel-exporter:local
+    environment: *exporter-env
+    ports: ["127.0.0.1:8000:8000"]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
+    restart: unless-stopped
+    healthcheck:
+      # Liveness: billing readiness /health can be 503 when the demo has ghost rows.
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://localhost:8000/status')"]
+      interval: 5s
+      timeout: 10s
       retries: 30
+
+  traffic:
+    image: gomodel-exporter:local
+    profiles: [tools]
+    user: root
+    command: [python, -m, demo.traffic, --rounds, "10"]
+    environment: *exporter-env
+    volumes: [demo-secrets:/secrets:ro]
+    depends_on:
+      bootstrap: {condition: service_completed_successfully}
 
 volumes:
   gomodel-db-data:
-  ollama-models:
   exporter-db-data:
+  lago-db-data:
+  lago-redis-data:
+  lago-storage:
+  demo-secrets:

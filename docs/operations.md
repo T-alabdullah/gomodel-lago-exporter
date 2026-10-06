@@ -1,7 +1,8 @@
 # Operating delivery and reconciliation
 
-Major Step 2 adds operational visibility and independent reconciliation. The full
-Compose stack and real GoModel/Lago acceptance demonstration are still Step 3.
+Delivery, operational visibility and independent reconciliation run together through
+`exporter serve`. See the README for the complete Compose stack and
+[deployment runbook](deployment.md) for startup, persistence and real-stack acceptance.
 
 ## Start and inspect
 

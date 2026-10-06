@@ -66,9 +66,14 @@ class LagoReadAPI:
             body = self.get(path, {**params, 'page': page, 'per_page': self.settings.reconciliation_page_size})
             try:
                 rows, meta = body[key], body['meta']
-                if not isinstance(rows, list) or int(meta['current_page']) != page:
-                    raise ValueError('invalid page')
                 observed_total = int(meta['total_count'])
+                # Lago's Pagination concern serializes current_page=0 when the
+                # collection is empty. Accept only that complete first response.
+                empty_first_page = (page == 1 and rows == [] and observed_total == 0
+                                    and meta.get('next_page') is None
+                                    and int(meta['current_page']) == 0)
+                if not isinstance(rows, list) or (int(meta['current_page']) != page and not empty_first_page):
+                    raise ValueError('invalid page')
                 if total is not None and total != observed_total:
                     raise ValueError('collection changed while paginating')
                 total = observed_total
