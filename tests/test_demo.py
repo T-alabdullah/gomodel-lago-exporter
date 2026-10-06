@@ -90,3 +90,24 @@ def test_gomodel_setup_persists_each_secret_before_next_create(tmp_path, monkeyp
     gomodel_setup.main()
     assert len(json.loads(path.read_text())) == 3
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize('operation', ['metric', 'plan', 'subscription'])
+def test_setup_never_writes_after_failed_existing_resource_lookup(operation):
+    from exporter.config import Settings
+    writes = []
+    def fake(req):
+        if req.method == 'GET':
+            return httpx.Response(503, text='temporarily unavailable')
+        # Customer upsert precedes subscription lookup; the subscription must not be created.
+        writes.append(req.url.path)
+        return httpx.Response(200, json={})
+    with httpx.Client(base_url='http://test', transport=httpx.MockTransport(fake)) as client:
+        with pytest.raises(SystemExit, match='HTTP 503'):
+            if operation == 'metric':
+                lago_setup.upsert_metric(client, lago_setup.metric_specs(Settings())[0], ['demo-small'])
+            elif operation == 'plan':
+                lago_setup.upsert_plan(client, {'plan': {'code': 'demo'}, 'package_size': 1000000}, [])
+            else:
+                lago_setup.upsert_customer_and_subscription(client, lago_setup.TEST_CUSTOMERS[0], {'currency': 'USD'})
+    assert writes == (['/api/v1/customers'] if operation == 'subscription' else [])

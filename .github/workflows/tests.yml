@@ -7,7 +7,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16.10-bookworm
         env:
           POSTGRES_PASSWORD: exporter
         ports: ['5434:5432']
@@ -22,7 +22,7 @@ jobs:
           fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.12.12'
       - run: python -m pip install -r requirements.lock
       - run: python -m pip install --no-deps --no-build-isolation -e '.[dev]'
       - name: Verify original handover baseline on PostgreSQL
@@ -37,8 +37,8 @@ jobs:
       - name: Package and dependency checks
         run: |
           python -m pip check
-          python -m build
-          python -m compileall -q exporter scripts
+          python -m build --no-isolation
+          python -m compileall -q exporter scripts demo
       - uses: actions/upload-artifact@v4
         if: always()
         with:

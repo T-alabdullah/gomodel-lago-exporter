@@ -17,6 +17,7 @@ import json
 import os
 import sys
 import time
+import tempfile
 from pathlib import Path
 
 import httpx
@@ -69,9 +70,12 @@ def main() -> None:
             print(f"  {name}: created")
 
             KEYS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            fd = os.open(KEYS_FILE, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w") as out:
+            with tempfile.NamedTemporaryFile(mode="w", dir=KEYS_FILE.parent, delete=False) as out:
                 out.write(json.dumps(saved, indent=2) + "\n")
+                out.flush()
+                os.fsync(out.fileno())
+                temporary = Path(out.name)
+            os.replace(temporary, KEYS_FILE)
     print(f"Secrets saved to {KEYS_FILE.name}")
 
 
