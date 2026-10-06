@@ -217,3 +217,24 @@ def test_invalid_ranges_rejected_before_work(lago, start, end):
     with pytest.raises(ValueError):
         make_runner(lago).backfill(start, end)
     assert not lago.requests
+
+
+def test_legacy_accepted_counts_survive_rejected_replay(gomodel, state, lago):
+    row = insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    state._conn.execute('DELETE FROM deliveries')
+    lago.subscriptions.pop('sub_acme')
+    make_runner(lago).backfill(T0, END)
+    assert status_of(state, row) is RowStatus.FAILED
+    assert state.acknowledged_tokens(row) == {TokenKind.INPUT: 35, TokenKind.OUTPUT: 5}
+    assert state._conn.execute('SELECT input_tokens_sent, output_tokens_sent FROM usage_rows').fetchone() == (35, 5)
+
+
+def test_explicit_exclusion_closes_previously_unmapped_dead_letter(gomodel, state, lago):
+    row = insert(gomodel, T0, key='ghost')
+    make_runner(lago).run_cycle()
+    assert state.open_dead_letters()
+    make_runner(lago, billable_providers=[]).backfill(T0, END)
+    assert status_of(state, row) is RowStatus.NOT_BILLABLE
+    assert not state.open_dead_letters()
+    assert not lago.stored

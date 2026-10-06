@@ -70,3 +70,22 @@ prompt repeated, so Ollama reused 34 of 35 prompt tokens), `exporter dry-run`
 produced 1 uncached + 34 cached input tokens per row, identical to GoModel's
 own split in `GET /admin/usage/log` (`uncached_input_tokens` / `cached_input_tokens`).
 Uncached + cached always equals `input_tokens`, so no token is billed twice.
+## Takeover Step 1
+
+**Durable intent:** freeze subscription, event codes, timestamps, token quantities and
+properties in `deliveries` before HTTP. Retries and replay use that snapshot. Retain
+acknowledgements across partial failures; drain pending records independently of the
+source overlap. The `usage_rows` table remains the terminal summary, not the retry queue.
+
+**Replay range:** `[start, end)`; dates are midnight UTC and timestamps require an
+explicit timezone. Replay does not move the polling cursor. Legacy rows preserve
+recorded destinations/accepted counts; original metric configuration is required
+because old state did not save full payloads. See the review for upgrade limitations.
+
+**Single writer:** polling, backfill and send-row acquire one PostgreSQL session advisory
+lock per state database. This prevents competing configuration snapshots. Stop old
+binaries before upgrade because they do not acquire this lock.
+
+**Cache edge values:** negative/nonfinite raw cache counters become zero. GoModel's
+maximum starts at zero; the original Python maximum could be negative when every
+candidate was negative and incorrectly inflate uncached input.

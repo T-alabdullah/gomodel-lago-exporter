@@ -1,17 +1,14 @@
 """The export loop: read -> map -> build -> send -> record, every few seconds.
 
-One cycle:
-  1. Start `overlap_window_seconds` behind the cursor (catches late rows).
-  2. Read rows page by page, oldest first.
-  3. Skip rows the state database already knows.
-  4. Map each new row, build its events, send them.
-  5. In ONE transaction: record every row's outcome, dead-letter the problems,
-     and move the cursor forward.
+Each cycle owns the state database's writer lock and drains durable pending
+deliveries before scanning the source overlap window. Before sending anything,
+commit the immutable destination and event payloads. After sending, atomically
+record acknowledgements, terminal outcomes/dead letters and any cursor movement.
 
-The no-loss rule: a row whose events got RETRY (Lago down, rate limited) is
-NOT recorded, and the cursor never moves past it. The cycle stops there and
-the next cycle tries again. A crash at any point is safe: whatever was sent but
-not recorded is re-sent next time, and Lago answers "duplicate".
+RETRY leaves a pending delivery, without a new terminal usage_rows record, and
+stops cursor advancement. Restart uses the saved payload, including after source
+or configuration changes. Backfill and send-row share this path without changing
+the polling cursor.
 """
 
 import dataclasses
@@ -193,6 +190,7 @@ class Runner:
         row = mapping.row
         if mapping.outcome is MappingOutcome.NOT_BILLABLE:
             store.record_row(row, RowStatus.NOT_BILLABLE)
+            store.resolve_dead_letter(row.id)
             report.not_billable += 1
             return
 

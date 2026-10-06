@@ -85,12 +85,17 @@ class StateStore:
 
     def prepare_delivery(self, delivery: Delivery) -> Delivery:
         """Commit the first payload; a retry can only change its pending flag."""
+        previous = self._conn.execute(
+            """SELECT input_tokens_sent, cached_input_tokens_sent, output_tokens_sent
+               FROM usage_rows WHERE usage_row_id = %s""", (delivery.row.id,),
+        ).fetchone()
+        acknowledged = {kind.value: count for kind, count in zip(TokenKind, previous or ()) if count > 0}
         saved = self._conn.execute(
-            """INSERT INTO deliveries (usage_row_id, payload) VALUES (%s, %s)
+            """INSERT INTO deliveries (usage_row_id, payload, acknowledged) VALUES (%s, %s, %s)
                ON CONFLICT (usage_row_id) DO UPDATE
                    SET pending = TRUE, updated_at = now()
                RETURNING payload""",
-            (delivery.row.id, json.dumps(delivery.to_dict(), default=str)),
+            (delivery.row.id, json.dumps(delivery.to_dict(), default=str), json.dumps(acknowledged)),
         ).fetchone()
         return Delivery.from_dict(saved[0])
 
@@ -284,7 +289,7 @@ class StateStore:
         )
 
     def resolve_dead_letter(self, row_id: str) -> None:
-        """Close the open dead letter for a row (it has now been billed)."""
+        """Close a repaired row's dead letter after delivery or explicit exclusion."""
         self._conn.execute(
             "UPDATE dead_letters SET resolved_at = now() "
             "WHERE usage_row_id = %s AND resolved_at IS NULL",

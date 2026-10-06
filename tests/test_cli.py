@@ -34,3 +34,15 @@ def test_config_masks_database_passwords_and_api_key(monkeypatch):
         assert json.loads(result.output)['lago_api_key'] == '**********'
     finally:
         get_settings.cache_clear()
+
+
+def test_successful_backfill_cli_passes_exact_boundaries(monkeypatch):
+    import exporter.cli as cli
+    calls = []
+    class Runner:
+        def backfill(self, start, end):
+            calls.append((start, end))
+    monkeypatch.setattr(cli, '_replay', lambda action: action(Runner()))
+    result = CliRunner().invoke(app, ['backfill', '2026-10-05', '2026-10-06'])
+    assert result.exit_code == 0
+    assert calls == [(_parse_boundary('2026-10-05'), _parse_boundary('2026-10-06'))]

@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 .env
 .gomodel-keys.json
+build/
+dist/
+test-results.xml
+.coverage
+htmlcov/
