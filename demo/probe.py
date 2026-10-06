@@ -79,7 +79,9 @@ def main(action):
         if action in ('late', 'older', 'fix-ghost'):
             with psycopg.connect(os.environ['GOMODEL_ADMIN_DB_URL'], autocommit=True) as conn:
                 if action == 'fix-ghost':
-                    result = conn.execute("UPDATE usage SET labels='[\"lago:sub_acme\"]'::jsonb WHERE provider_name='ollama-qai' AND (labels IS NULL OR labels='[]'::jsonb) AND (user_path IS NULL OR user_path='')")
+                    missing = [row.id for row in reconciler.source_rows(start, now).values()
+                               if map_row(row, settings).outcome is MappingOutcome.UNMAPPED]
+                    result = conn.execute("UPDATE usage SET labels='[\"lago:sub_acme\"]'::jsonb WHERE id=ANY(%s::uuid[])", (missing,))
                     return {'repaired_rows': result.rowcount}
                 timestamp = now-timedelta(seconds=30) if action == 'late' else start+timedelta(seconds=1)
                 row_id = str(uuid.uuid4())
