@@ -136,6 +136,9 @@ this local demo as a production service.
 
 ## Tests and acceptance
 
+**Completed:** 201 regression tests (zero skips) and all 11 real GoModel/Lago
+acceptance scenarios passed. See [recorded results and limits](docs/step-3-validation.md).
+
 Unit and PostgreSQL regression tests:
 
 ```bash

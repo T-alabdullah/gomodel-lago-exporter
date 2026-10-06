@@ -2,7 +2,16 @@
 
 Step 3 completes the environment and delivery artifacts. Its gate consists of the
 PostgreSQL regression workflow plus a separate fresh-stack acceptance workflow.
-Final run links and results are recorded after the full acceptance gate passes.
+**Complete:** implementation commit `5b389263099ef454e934a77355c80320f8e22673`
+passed both gates on 6 October 2026:
+
+- [Regression and package gate](https://github.com/T-alabdullah/gomodel-lago-exporter/actions/runs/37438980024): **201 passed, zero skips**; original baseline **76 passed** separately. Dependency checks, compilation and wheel/source builds passed.
+- [Real GoModel/Lago acceptance](https://github.com/T-alabdullah/gomodel-lago-exporter/actions/runs/37438980016): **all 11 recorded scenarios passed**.
+- Final state: **234 source rows** (232 successful API requests plus two late-row fixtures), **118 billed rows**, **116 excluded rows**, **354 expected/actual Lago events** and **354 unique acknowledgements**. No pending deliveries, unmapped rows or open dead letters remained.
+- Final reconciliation matched, every reported token difference was zero, and `/health` returned healthy after a retained-volume restart and setup rerun.
+
+The subsequent completion update changes documentation only. One non-failing
+Starlette/httpx TestClient deprecation warning remains; no regression tests were skipped.
 
 ## Environment
 
@@ -54,6 +63,12 @@ Lago returns `current_page: 0` for an empty result. The read adapter now accepts
 only for a complete, empty first response, with regression tests rejecting inconsistent
 zero-page metadata. Existing pagination caps, consistency checks and unavailable-evidence
 behavior remain in force.
+
+Container startup also exposed a transient PostgreSQL initialization race. Database
+health checks now use TCP so the temporary socket-only initialization server cannot
+unblock dependent applications. The crash probe runs under container init, allowing
+its child process to receive SIGKILL reliably. Restart polling tolerates temporary
+connection resets and rechecks any daily audit that coincided with the outage.
 
 Processing grace was also exercised: auditing through the current instant correctly
 returns incomplete. Acceptance selects a settled end boundary rather than disabling

@@ -57,6 +57,9 @@ Step 1 regressions must stay green.
 
 ## 3. Complete environment and acceptance demonstration
 
+**Complete:** 201 regression tests with zero skips and all 11 real-stack acceptance
+scenarios passed. See [Step 3 validation](step-3-validation.md).
+
 - Add exporter container, pinned Lago API/worker/Postgres/Redis components, unattended
   organization/bootstrap and read-only-role provisioning after GoModel migration.
 - Replace model downloads with a deterministic mock provider supporting streaming
