@@ -5,6 +5,8 @@ GoModel itself does it (EntryInputSegments in internal/usage/request_summary.go,
 GoModel 0.1.99), so cached tokens are never billed twice.
 """
 
+import math
+
 from exporter.config import CacheWriteBilling, Settings
 from exporter.contracts import LagoEvent, MappingOutcome, MappingResult, TokenKind, UsageRow
 
@@ -22,7 +24,9 @@ def _raw_int(raw: dict, key: str) -> int:
     value = raw.get(key)
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return 0
-    return int(value)
+    if isinstance(value, float) and not math.isfinite(value):
+        return 0
+    return max(int(value), 0)
 
 
 def input_segments(row: UsageRow) -> tuple[int, int, int]:
@@ -51,7 +55,7 @@ def input_segments(row: UsageRow) -> tuple[int, int, int]:
     return base - cached, cached, cache_write
 
 
-def build_events(mapping: MappingResult, settings: Settings) -> list[LagoEvent]:
+def build_events(mapping: MappingResult, settings: Settings, *, include_zero: bool = False) -> list[LagoEvent]:
     """Up to three events for one mapped row; token counts of 0 are skipped."""
     if mapping.outcome is not MappingOutcome.MAPPED or not mapping.external_subscription_id:
         raise ValueError(f"row {mapping.row.id} is not mapped ({mapping.outcome})")
@@ -74,7 +78,7 @@ def build_events(mapping: MappingResult, settings: Settings) -> list[LagoEvent]:
 
     events = []
     for kind, count in tokens.items():
-        if count <= 0:
+        if count <= 0 and not include_zero:
             continue
         events.append(LagoEvent(
             usage_row_id=row.id,

@@ -5,7 +5,9 @@ double billing, no lost usage after an outage, and a daily reconciliation.
 
 > Work in progress. See `docs/decisions.md` for every behaviour choice.
 
-> **Picking this up?** Start with [HANDOVER.md](HANDOVER.md): how to run it, how to check it works, and where Steps 9–14 plug in.
+> **Takeover plan:** [three major steps](docs/development-plan.md), [full repository review](docs/repository-review.md), and [Step 1 validation](docs/step-1-validation.md).
+
+> **Original handover:** Start with [HANDOVER.md](HANDOVER.md): how to run it, how to check it works, and where Steps 9–14 plug in.
 
 ## Quick start (development)
 
@@ -78,9 +80,45 @@ next through them.
 | 6 | Mapper + event builder | ✅ |
 | 7 | Lago client + sender | ✅ |
 | 8 | Runner + HANDOVER.md | ✅ |
-| 9 | Backfill | ⬜ |
+| 9 | Backfill | ✅ takeover Step 1 |
 | 10 | Reconciliation | ⬜ |
 | 11 | Status page, metrics, health | ⬜ |
 | 12 | Full test environment | ⬜ |
 | 13 | Failure tests | ⬜ |
 | 14 | README, runbook, presentation | ⬜ |
+
+## Safe replay and recovery
+
+```bash
+exporter backfill 2026-10-01 2026-10-06
+exporter backfill 2026-10-05T00:00:00Z 2026-10-05T12:00:00Z
+```
+
+The start is included and the end is excluded. Dates mean midnight UTC; timestamps
+must include a timezone. Re-run the same range after interruption. Replay does not
+advance the normal polling cursor. Fix an unmapped source row or create its missing
+subscription, then replay its range to close the dead letter.
+
+Every mapped row now saves its destination and exact event payload in `deliveries`
+before HTTP. Polling, backfill and `send-row` share this durable path. Pending records
+are retried even if source rows disappear; payloads and destinations remain frozen.
+One state-database writer runs at a time. If a backfill finds an active polling cycle,
+retry when that cycle ends or stop the polling process first. Run-once and replay exit
+nonzero when work is retrying, rejected or unmapped.
+
+Run `exporter init-db` on upgrade, after stopping old exporter versions. Preserve the
+state database and original metric configuration for legacy rows. See the review for
+legacy-data limits and the difference between safe replay and correcting a charge.
+
+## Test gate
+
+```bash
+python -m pytest -q --require-db
+```
+
+Set `EXPORTER_TEST_ADMIN_DB_URL` to a **dedicated test PostgreSQL server** (default:
+`postgresql://postgres:exporter@localhost:5434/postgres`). The tests create named test
+databases and reset their tables. Do not point them at production. Without `--require-db`,
+local unit tests can run while unavailable database tests skip; that is not a completed
+major-step gate. GitHub Actions runs the original baseline and expanded suite on
+PostgreSQL 16, forbids skips, checks dependencies and builds the distributable package.

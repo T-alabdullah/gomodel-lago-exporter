@@ -47,3 +47,17 @@ CREATE TABLE IF NOT EXISTS dead_letters (
 );
 CREATE UNIQUE INDEX IF NOT EXISTS dead_letters_one_open_per_row
     ON dead_letters (usage_row_id) WHERE resolved_at IS NULL;
+
+-- Saved and committed BEFORE any HTTP send. Retries always reuse this exact
+-- destination and payload, even after a source/config change or source deletion.
+CREATE TABLE IF NOT EXISTS deliveries (
+    usage_row_id UUID PRIMARY KEY,
+    payload JSONB NOT NULL,
+    pending BOOLEAN NOT NULL DEFAULT TRUE,
+    acknowledged JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS deliveries_pending_idx
+    ON deliveries (usage_row_id) WHERE pending;

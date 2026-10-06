@@ -9,6 +9,7 @@ fail together (e.g. "record these rows AND move the cursor"), wrap them:
 """
 
 import json
+import dataclasses
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -18,10 +19,15 @@ from typing import Any
 
 import psycopg
 
-from exporter.contracts import RowStatus, TokenKind, UsageRow
+from exporter.contracts import MappingOutcome, MappingResult, RowStatus, SendResult, TokenKind, UsageRow
+from exporter.delivery import Delivery
 
 SCHEMA_FILE = Path(__file__).with_name("schema.sql")
 CURSOR_NAME = "usage"
+
+
+class ExporterBusyError(RuntimeError):
+    """Another runner/backfill owns the writer lock in this state database."""
 
 
 @dataclass(frozen=True, order=True)
@@ -56,6 +62,103 @@ class StateStore:
         """All-or-nothing block. Nested blocks become savepoints."""
         with self._conn.transaction():
             yield
+
+    @contextmanager
+    def writer_lock(self) -> Iterator[None]:
+        # A session lock avoids holding an SQL transaction open during HTTP.
+        # Every exporter writer (run, backfill, send-row) uses the same lock.
+        lock_id = 70671420261006
+        if not self._conn.execute("SELECT pg_try_advisory_lock(%s)", (lock_id,)).fetchone()[0]:
+            raise ExporterBusyError("Another exporter writer is active; retry after it finishes.")
+        try:
+            yield
+        finally:
+            self._conn.execute("SELECT pg_advisory_unlock(%s)", (lock_id,))
+
+    # --- Delivery intent --------------------------------------------------
+
+    def get_delivery(self, row_id: str) -> Delivery | None:
+        found = self._conn.execute(
+            "SELECT payload FROM deliveries WHERE usage_row_id = %s", (row_id,),
+        ).fetchone()
+        return Delivery.from_dict(found[0]) if found else None
+
+    def prepare_delivery(self, delivery: Delivery) -> Delivery:
+        """Commit the first payload; a retry can only change its pending flag."""
+        previous = self._conn.execute(
+            """SELECT input_tokens_sent, cached_input_tokens_sent, output_tokens_sent
+               FROM usage_rows WHERE usage_row_id = %s""", (delivery.row.id,),
+        ).fetchone()
+        acknowledged = {kind.value: count for kind, count in zip(TokenKind, previous or ()) if count > 0}
+        saved = self._conn.execute(
+            """INSERT INTO deliveries (usage_row_id, payload, acknowledged) VALUES (%s, %s, %s)
+               ON CONFLICT (usage_row_id) DO UPDATE
+                   SET pending = TRUE, updated_at = now()
+               RETURNING payload""",
+            (delivery.row.id, json.dumps(delivery.to_dict(), default=str), json.dumps(acknowledged)),
+        ).fetchone()
+        return Delivery.from_dict(saved[0])
+
+    def pending_deliveries(self, limit: int, after_id: str | None = None) -> list[Delivery]:
+        rows = self._conn.execute(
+            """SELECT payload FROM deliveries WHERE pending
+                   AND (%s::uuid IS NULL OR usage_row_id > %s::uuid)
+               ORDER BY usage_row_id LIMIT %s""", (after_id, after_id, limit),
+        ).fetchall()
+        return [Delivery.from_dict(row[0]) for row in rows]
+
+    def finish_delivery(self, row_id: str, results: list[SendResult], pending: bool) -> None:
+        acknowledged = {r.event.kind.value: r.event.tokens for r in results if r.counts_as_sent}
+        errors = list(dict.fromkeys(r.error for r in results if r.error))
+        self._conn.execute(
+            """UPDATE deliveries SET pending = %s,
+                   acknowledged = acknowledged || %s::jsonb,
+                   last_error = %s, updated_at = now() WHERE usage_row_id = %s""",
+            (pending, json.dumps(acknowledged), "; ".join(errors) or None, row_id),
+        )
+
+    def acknowledged_tokens(self, row_id: str) -> dict[TokenKind, int]:
+        row = self._conn.execute(
+            "SELECT acknowledged FROM deliveries WHERE usage_row_id = %s", (row_id,),
+        ).fetchone()
+        return {TokenKind(k): v for k, v in row[0].items()} if row else {}
+
+    def legacy_mapping(self, mapping: MappingResult) -> MappingResult:
+        """Preserve destinations and recorded dimensions from pre-outbox state."""
+        old = self._conn.execute(
+            """SELECT external_subscription_id, usage_timestamp, model, provider_name
+               FROM usage_rows WHERE usage_row_id = %s""", (mapping.row.id,),
+        ).fetchone()
+        if old and old[0]:
+            row = dataclasses.replace(mapping.row, timestamp=old[1], model=old[2], provider_name=old[3])
+            return MappingResult(row, MappingOutcome.MAPPED, old[0], "previously recorded destination")
+        return mapping
+
+    def legacy_events(self, row_id: str, events: list) -> list:
+        """Sent legacy rows replay their accepted quantities, not edited source counts.
+
+        Before deliveries existed, metric codes and full payloads were not saved.
+        Operators must retain the old metric configuration during migration.
+        """
+        from exporter.events import FIELD_NAMES
+        from exporter.contracts import LagoEvent
+
+        old = self._conn.execute(
+            """SELECT status, input_tokens_sent, cached_input_tokens_sent, output_tokens_sent
+               FROM usage_rows WHERE usage_row_id = %s""", (row_id,),
+        ).fetchone()
+        if not old:
+            return [event for event in events if event.tokens > 0]
+        saved = dict(zip(TokenKind, old[1:]))
+        # The caller supplies all three kinds, including zero, for legacy recovery.
+        recovered: list[LagoEvent] = []
+        for event in events:
+            count = saved[event.kind] if old[0] == RowStatus.SENT.value else (saved[event.kind] or event.tokens)
+            if count > 0:
+                recovered.append(dataclasses.replace(
+                    event, tokens=count, properties={**event.properties, FIELD_NAMES[event.kind]: count},
+                ))
+        return recovered
 
     # --- Schema ------------------------------------------------------------
 
@@ -186,7 +289,7 @@ class StateStore:
         )
 
     def resolve_dead_letter(self, row_id: str) -> None:
-        """Close the open dead letter for a row (it has now been billed)."""
+        """Close a repaired row's dead letter after delivery or explicit exclusion."""
         self._conn.execute(
             "UPDATE dead_letters SET resolved_at = now() "
             "WHERE usage_row_id = %s AND resolved_at IS NULL",

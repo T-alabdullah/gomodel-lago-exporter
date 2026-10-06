@@ -95,3 +95,16 @@ def test_cache_write_tokens_can_be_ignored():
 def test_weird_raw_data_values_are_ignored():
     row = usage_row(input_tokens=100, raw_data={"cached_tokens": "lots", "prompt_cached_tokens": True})
     assert input_segments(row) == (100, 0, 0)
+
+def test_negative_cache_counts_cannot_inflate_input():
+    row = usage_row(input_tokens=100, raw_data={
+        'cache_read_input_tokens': -10, 'prompt_cached_tokens': -20, 'cached_tokens': -30,
+        'cache_creation_input_tokens': -4, 'cache_write_input_tokens': -2,
+    })
+    assert input_segments(row) == (100, 0, 0)
+    assert tokens_by_kind(events_for(row))[TokenKind.INPUT] == 100
+
+
+def test_nonfinite_cache_counts_do_not_crash():
+    row = usage_row(raw_data={'cached_tokens': float('inf'), 'prompt_cached_tokens': float('nan')})
+    assert input_segments(row) == (35, 0, 0)

@@ -198,3 +198,26 @@ def test_null_and_empty_fields_get_safe_defaults(db, reader):
     assert row.raw_data == {}
     assert row.cache_type is None and not row.is_cache_hit
     assert row.provider_name is None
+
+def test_reader_works_with_role_that_cannot_write(db):
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+    role = 'test_reader_' + uuid.uuid4().hex[:12]
+    insert(db, T0)
+    db.execute(sql.SQL('CREATE ROLE {} LOGIN PASSWORD {}').format(sql.Identifier(role), sql.Literal('test-password')))
+    try:
+        db.execute(sql.SQL('ALTER ROLE {} SET default_transaction_read_only = on').format(sql.Identifier(role)))
+        db.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(role)))
+        db.execute(sql.SQL('GRANT SELECT ON usage TO {}').format(sql.Identifier(role)))
+        dsn = make_conninfo(_test_db_url(), user=role, password='test-password')
+        assert len(UsageReader(dsn).read_after(None, 10)) == 1
+        with psycopg.connect(dsn, autocommit=True) as reader_connection:
+            with pytest.raises(psycopg.errors.ReadOnlySqlTransaction):
+                reader_connection.execute('DELETE FROM usage')
+            reader_connection.execute('SET default_transaction_read_only = off')
+            with pytest.raises(psycopg.errors.InsufficientPrivilege):
+                reader_connection.execute('DELETE FROM usage')
+    finally:
+        db.execute('RESET ROLE')
+        db.execute(sql.SQL('DROP OWNED BY {}').format(sql.Identifier(role)))
+        db.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(role)))

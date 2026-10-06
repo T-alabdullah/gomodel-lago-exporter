@@ -172,3 +172,46 @@ def test_wrong_api_key_raises_instead_of_rejecting_events(lago, sleeps):
     lago.fail_next = [401]
     with pytest.raises(LagoAuthError):
         make_sender(lago, sleeps).send([event()])
+
+def test_mixed_duplicate_and_other_errors_are_not_success():
+    import httpx
+    from exporter.lago_client import classify_single
+    response = httpx.Response(422, json={'error_details': {
+        'transaction_id': ['value_already_exist', 'value_is_invalid'],
+    }})
+    assert classify_single(response)[0] is SendOutcome.REJECTED
+
+
+@pytest.mark.parametrize('body', [{}, {'subscription': {}}, {'subscription': {'started_at': None}},
+                                   {'subscription': {'started_at': '2026-01-01'}}])
+def test_invalid_subscription_response_is_retryable(body):
+    import httpx
+    from exporter.lago_client import LagoClient
+    client = LagoClient('http://lago.test', 'test', transport=httpx.MockTransport(
+        lambda request: httpx.Response(200, json=body),
+    ))
+    try:
+        results = Sender(client, settings(), sleep=lambda _: None).send([event()])
+        assert outcomes(results) == [SendOutcome.RETRY]
+    finally:
+        client.close()
+
+
+def test_unexpected_subscription_status_is_not_permanent_rejection(lago, sleeps):
+    lago.fail_next = [400]
+    assert outcomes(make_sender(lago, sleeps).send([event()])) == [SendOutcome.RETRY]
+
+
+def test_subscription_id_is_encoded_as_single_path_segment():
+    import httpx
+    from exporter.lago_client import LagoClient
+    requests = []
+    def handle(request):
+        requests.append(request)
+        return httpx.Response(404, json={})
+    client = LagoClient('http://lago.test', 'key', transport=httpx.MockTransport(handle))
+    try:
+        client.get_subscription('sub/one?status=terminated')
+        assert requests[0].url.raw_path == b'/api/v1/subscriptions/sub%2Fone%3Fstatus%3Dterminated'
+    finally:
+        client.close()

@@ -1,3 +1,8 @@
+> **Takeover update (6 October 2026):** This is the historical Steps 1–8 handover.
+> Follow [the three-step plan](docs/development-plan.md) and [repository review](docs/repository-review.md)
+> for current behavior. Step 1 adds durable intent before HTTP and safe replay; the
+> original retry and send-row descriptions below no longer describe the current code.
+
 # Handover: Steps 1–8 done → Steps 9–14 are yours
 
 The exporter works end to end. GoModel usage is read, mapped to a Lago
