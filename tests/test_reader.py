@@ -198,3 +198,24 @@ def test_null_and_empty_fields_get_safe_defaults(db, reader):
     assert row.raw_data == {}
     assert row.cache_type is None and not row.is_cache_hit
     assert row.provider_name is None
+
+def test_reader_works_with_role_that_cannot_write(db):
+    from psycopg import sql
+    from psycopg.conninfo import make_conninfo
+    role = 'test_reader_' + uuid.uuid4().hex[:12]
+    insert(db, T0)
+    db.execute(sql.SQL('CREATE ROLE {} LOGIN').format(sql.Identifier(role)))
+    try:
+        db.execute(sql.SQL('ALTER ROLE {} SET default_transaction_read_only = on').format(sql.Identifier(role)))
+        db.execute(sql.SQL('GRANT USAGE ON SCHEMA public TO {}').format(sql.Identifier(role)))
+        db.execute(sql.SQL('GRANT SELECT ON usage TO {}').format(sql.Identifier(role)))
+        # SET ROLE on the existing administrative connection tests table grants;
+        # a separate login would require changing the CI server's authentication.
+        db.execute(sql.SQL('SET ROLE {}').format(sql.Identifier(role)))
+        assert len(db.execute('SELECT * FROM usage').fetchall()) == 1
+        with pytest.raises(psycopg.errors.InsufficientPrivilege):
+            db.execute('DELETE FROM usage')
+    finally:
+        db.execute('RESET ROLE')
+        db.execute(sql.SQL('DROP OWNED BY {}').format(sql.Identifier(role)))
+        db.execute(sql.SQL('DROP ROLE {}').format(sql.Identifier(role)))

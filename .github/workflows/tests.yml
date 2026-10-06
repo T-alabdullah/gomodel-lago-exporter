@@ -12,7 +12,7 @@ jobs:
           POSTGRES_PASSWORD: exporter
         ports: ['5434:5432']
         options: >-
-          --health-cmd 'pg_isready -U postgres'
+          --health-cmd "pg_isready -U postgres"
           --health-interval 2s --health-timeout 3s --health-retries 30
     env:
       EXPORTER_TEST_ADMIN_DB_URL: postgresql://postgres:exporter@localhost:5434/postgres
