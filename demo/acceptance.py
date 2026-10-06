@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import time
 import urllib.request
+import urllib.error
 
 COMPOSE = ['docker', 'compose', '--env-file', '.env.demo']
 results = []
@@ -51,9 +52,24 @@ def traffic(rounds=1, ghost=True):
     return json.loads(result.stdout.strip().splitlines()[-1])['successful_requests']
 
 
+def http_ok(url):
+    try:
+        with urllib.request.urlopen(url, timeout=10) as response:
+            return response.status == 200
+    except urllib.error.URLError:
+        return False
+
+
 def drained(expected_rows):
     def ready():
-        s = probe('snapshot')
+        try:
+            s = probe('snapshot')
+        except AssertionError as error:
+            # Pagination can move while catch-up is actively inserting events.
+            # The exporter correctly refuses to call that complete evidence.
+            if 'EvidenceUnavailable' in str(error):
+                return None
+            raise
         return s if (s['source_rows'] == expected_rows and not s['pending']
                      and s['expected_events'] == s['remote_events']
                      and sum(s['counts'].values()) == expected_rows) else None
@@ -131,6 +147,7 @@ def main():
     pending = compose('exec', '-T', 'exporter-db', 'psql', '-U', 'postgres', '-d', 'exporter', '-Atc', sql).stdout.strip()
     assert int(pending) > 0, pending
     compose('start', 'lago-api')
+    eventually(lambda: http_ok('http://127.0.0.1:3000/health'))
     recovered = drained(rows)
     record('lago-outage-under-load-and-catchup', source_rows=rows, pending_during_outage=int(pending), recovered=recovered)
 
@@ -169,6 +186,16 @@ def main():
     compose('up', '-d', '--wait', '--wait-timeout', '600')
     after = drained(rows)
     assert after['remote_ids'] == before['remote_ids'] and after['acknowledgements'] == before['acknowledgements'], (before, after)
+    compose('stop', 'exporter')
+    final_report = audit_matched()  # Setup rerun with existing events must preserve billed units too.
+    compose('start', 'exporter')
+    def ready_http():
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=10) as response:
+                return json.load(response)['healthy']
+        except urllib.error.URLError:
+            return False
+    eventually(ready_http)
     with urllib.request.urlopen('http://127.0.0.1:8000/status') as response:
         status = json.load(response)
     with urllib.request.urlopen('http://127.0.0.1:8000/metrics') as response:
@@ -177,7 +204,7 @@ def main():
         assert b'<html' in response.read().lower()
     with urllib.request.urlopen('http://127.0.0.1:8000/health') as response:
         assert json.load(response)['healthy'] is True
-    record('persistent-restart-and-status-endpoints', final_snapshot=after, status=status)
+    record('persistent-restart-and-status-endpoints', final_snapshot=after, report=final_report, status=status)
     print('All real-stack acceptance scenarios passed.', flush=True)
 
 
