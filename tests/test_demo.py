@@ -111,3 +111,12 @@ def test_setup_never_writes_after_failed_existing_resource_lookup(operation):
             else:
                 lago_setup.upsert_customer_and_subscription(client, lago_setup.TEST_CUSTOMERS[0], {'currency': 'USD'})
     assert writes == (['/api/v1/customers'] if operation == 'subscription' else [])
+
+
+@pytest.mark.parametrize('error_type', [ConnectionResetError, TimeoutError])
+def test_acceptance_health_poll_retries_raw_socket_failures(monkeypatch, error_type):
+    from demo import acceptance
+    def restarting(*args, **kwargs):
+        raise error_type('service is restarting')
+    monkeypatch.setattr(acceptance.urllib.request, 'urlopen', restarting)
+    assert acceptance.http_ok('http://localhost:3000/health') is False
