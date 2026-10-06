@@ -28,6 +28,8 @@ Full real-Lago acceptance remains the final step's gate.
 
 ## 2. Reconciliation and operational visibility
 
+**Complete:** 182 tests passed with no skips; see [design and validation](step-2-design.md).
+
 - Implement a persisted reconciliation report and daily scheduler, with an explicit UTC
   period and consistent subscription/customer, model and token-kind dimensions.
 - Compare GoModel billable expectations, exporter acknowledgements (including accepted

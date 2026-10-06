@@ -52,4 +52,13 @@ are simulated using response shapes checked against the pinned source. Actual La
 billing integration, the real outage demonstration and clean Compose startup remain
 Step 3 gates; this step does not claim those have run.
 
-Final CI results are recorded below after the gate completes.
+Validation of implementation commit `1e1110a115d52929ce19420eb5cff0d4d3842e5e`:
+
+- [PostgreSQL CI run](https://github.com/T-alabdullah/gomodel-lago-exporter/actions/runs/37432979275): **182 passed, zero skipped**.
+- Original handover baseline: **76 passed** independently.
+- Dependency consistency, bytecode compilation, wheel and source distribution builds passed.
+- One non-failing Starlette/httpx TestClient deprecation warning remains; dependency
+  reproducibility is part of Step 3.
+
+The gate includes a regression ensuring persistent mismatches cannot starve
+never-audited catch-up periods. Step 3 has not started.
