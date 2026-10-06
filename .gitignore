@@ -9,3 +9,7 @@ dist/
 test-results.xml
 .coverage
 htmlcov/
+.env.demo
+.demo/
+acceptance-results.json
+compose-logs.txt

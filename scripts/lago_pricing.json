@@ -6,7 +6,8 @@
   },
   "package_size": 1000000,
   "prices_per_million_tokens": {
-    "qwen2.5:0.5b": { "input": "0.10", "cached_input": "0.05", "output": "0.40" }
+    "demo-small": { "input": "0.10", "cached_input": "0.05", "output": "0.40" },
+    "demo-large": { "input": "0.20", "cached_input": "0.10", "output": "0.80" }
   },
   "default_price_per_million_tokens": { "input": "0.10", "cached_input": "0.05", "output": "0.40" }
 }

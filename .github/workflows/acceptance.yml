@@ -1,0 +1,35 @@
+name: Real-stack acceptance
+on:
+  push:
+    branches: [codex/complete-acceptance]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  compose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate demo credentials
+        run: python3 scripts/init_demo.py
+      - name: Boot real GoModel and Lago from empty volumes
+        run: |
+          docker compose --env-file .env.demo config --quiet
+          docker compose --env-file .env.demo up -d --build --wait --wait-timeout 600
+      - name: Acceptance scenarios
+        run: python3 demo/acceptance.py
+      - name: Container logs
+        if: always()
+        run: docker compose --env-file .env.demo logs --no-color > compose-logs.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-stack-evidence
+          path: |
+            acceptance-results.json
+            compose-logs.txt
+      - name: Clean up this ephemeral CI stack
+        if: always()
+        run: docker compose --env-file .env.demo down -v
