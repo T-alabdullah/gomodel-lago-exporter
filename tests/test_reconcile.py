@@ -293,3 +293,29 @@ def test_ambiguous_overlapping_historical_periods_are_incomplete(gomodel, state,
     lago.past_periods = [period, deepcopy(period)]
     lago.terminated['sub_acme'] = lago.subscriptions.pop('sub_acme')
     assert make_reconciler(lago).run(DAY, END)['status'] == 'incomplete'
+
+
+def test_unexpected_lago_event_is_not_ignored(gomodel, state, lago):
+    row = insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    unexpected = deepcopy(lago.stored[('sub_acme', row+':in')])
+    unexpected['transaction_id'] = 'orphan:in'
+    lago.stored[('sub_acme', 'orphan:in')] = unexpected
+    report = make_reconciler(lago).run(DAY, END)
+    assert report['status'] == 'mismatch'
+    assert 'unexpected_lago_event' in codes(report)
+
+
+def test_malformed_remote_tokens_produce_incomplete_evidence(gomodel, state, lago):
+    row = insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    lago.stored[('sub_acme', row+':in')]['properties']['input_tokens'] = 'not-a-number'
+    report = make_reconciler(lago).run(DAY, END)
+    assert report['status'] == 'incomplete'
+    assert 'malformed_lago_event' in codes(report)
+
+
+def test_retention_limit_never_claims_an_empty_historical_period_matched(gomodel, state, lago):
+    report = make_reconciler(lago).run(DAY-timedelta(days=100), DAY-timedelta(days=99))
+    assert report['status'] == 'incomplete'
+    assert 'source_retention' in codes(report)

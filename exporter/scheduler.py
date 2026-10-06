@@ -19,7 +19,9 @@ class DailyScheduler:
         midnight = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
         if now < midnight + timedelta(seconds=self.settings.reconciliation_delay_seconds):
             midnight -= timedelta(days=1)
-        # Newest first: the current alert remains useful even during long downtime.
+        # Newest first within each priority; never-audited days take precedence
+        # over retries so persistent mismatches cannot starve catch-up.
+        candidates = []
         for offset in range(self.settings.reconciliation_lookback_days):
             end = midnight - timedelta(days=offset)
             start = end - timedelta(days=1)
@@ -29,10 +31,12 @@ class DailyScheduler:
                 completed, status = previous
                 if (status == 'matched' and completed.date() == now.date()) or (status != 'matched' and (now - completed).total_seconds() < self.settings.reconciliation_retry_seconds):
                     continue
-            # Reconciler's global writer lock serializes with delivery. Recheck the
-            # period under that lock in run_if_due to prevent competing schedulers.
-            return self.reconciler.run_if_due(start, end, now)
-        return None
+            candidates.append((0 if previous is None else 1, offset, start, end))
+        if not candidates:
+            return None
+        _, _, start, end = min(candidates)
+        # Recheck under the writer lock to prevent competing schedulers.
+        return self.reconciler.run_if_due(start, end, now)
 
     def run_forever(self, stop: threading.Event):
         while not stop.is_set():

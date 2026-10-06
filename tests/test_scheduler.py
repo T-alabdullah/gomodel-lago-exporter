@@ -53,3 +53,11 @@ def test_catchup_uses_configured_lookback(gomodel, state, lago):
         state._conn.execute('UPDATE reconciliation_runs SET completed_at = %s', (NOW,))
     assert starts == [(DAY-timedelta(days=i)).isoformat() for i in range(3)]
     assert task.tick() is None
+
+
+def test_persistent_mismatch_does_not_starve_unaudited_day(gomodel, state, lago):
+    state.save_reconciliation(dict(start=DAY.isoformat(), end=END.isoformat(), status='mismatch', issues=[]))
+    state._conn.execute('UPDATE reconciliation_runs SET completed_at = %s', (NOW-timedelta(hours=1),))
+    task = DailyScheduler(settings(reconciliation_lookback_days=2), lambda: StateStore(_url(STATE_DB)),
+                          make_reconciler(lago), now=lambda: NOW)
+    assert task.tick()['end'] == DAY.isoformat()
