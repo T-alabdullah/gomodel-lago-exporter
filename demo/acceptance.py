@@ -56,7 +56,7 @@ def http_ok(url):
     try:
         with urllib.request.urlopen(url, timeout=10) as response:
             return response.status == 200
-    except urllib.error.URLError:
+    except OSError:
         return False
 
 
@@ -188,12 +188,13 @@ def main():
     assert after['remote_ids'] == before['remote_ids'] and after['acknowledgements'] == before['acknowledgements'], (before, after)
     compose('stop', 'exporter')
     final_report = audit_matched()  # Setup rerun with existing events must preserve billed units too.
+    probe('retry-audits')  # Recheck any daily audit that coincided with the deliberate outage.
     compose('start', 'exporter')
     def ready_http():
         try:
             with urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=10) as response:
                 return json.load(response)['healthy']
-        except urllib.error.URLError:
+        except OSError:
             return False
     eventually(ready_http)
     with urllib.request.urlopen('http://127.0.0.1:8000/status') as response:

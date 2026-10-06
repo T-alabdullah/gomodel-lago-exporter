@@ -63,6 +63,16 @@ def main(action):
             if len(sys.argv) == 4:
                 start, end = map(datetime.fromisoformat, sys.argv[2:4])
             return reconciler.run(start, end)
+        if action == 'retry-audits':
+            with psycopg.connect(settings.state_db_url) as conn:
+                failed = conn.execute('''SELECT period_start, period_end FROM (
+                    SELECT DISTINCT ON (period_start, period_end) period_start, period_end, status
+                    FROM reconciliation_runs ORDER BY period_start, period_end, id DESC
+                    ) latest WHERE status != 'matched' ''').fetchall()
+            for lo, hi in failed:
+                report = reconciler.run(lo, hi)
+                assert report['status'] == 'matched', report
+            return {'retried_periods': len(failed)}
         if action == 'cycle':
             return vars(runner.run_cycle())
         if action == 'backfill':
