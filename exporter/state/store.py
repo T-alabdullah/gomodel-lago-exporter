@@ -416,3 +416,21 @@ class StateStore:
         return dict(counts=self.status_counts(), workers=workers, pending=pending,
                     oldest_pending=oldest, events_acknowledged_today=acknowledged_today,
                     dead_letters=self.open_dead_letters(), reconciliation=self.latest_reconciliation())
+
+
+    def recent_acknowledgements(self, start, end, cutoff):
+        return [str(row[0]) for row in self._conn.execute(
+            """SELECT DISTINCT a.usage_row_id FROM event_acknowledgements a
+               JOIN deliveries d ON d.usage_row_id = a.usage_row_id
+               WHERE a.first_ack_at > %s AND (d.payload->'row'->>'timestamp')::timestamptz >= %s
+                 AND (d.payload->'row'->>'timestamp')::timestamptz < %s""", (cutoff, start, end),
+        ).fetchall()]
+
+    def unresolved_reconciliations(self, since):
+        return self._conn.execute(
+            """SELECT count(*) FROM (
+                 SELECT DISTINCT ON (period_start, period_end) status
+                 FROM reconciliation_runs WHERE period_end > %s
+                 ORDER BY period_start, period_end, id DESC
+               ) latest WHERE status != 'matched'""", (since,),
+        ).fetchone()[0]

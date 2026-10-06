@@ -2,7 +2,7 @@
 
 import html
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
 from fastapi.encoders import jsonable_encoder
@@ -61,6 +61,10 @@ class Monitor:
                     alerts.append('backlog_scan_incomplete')
                 if state['counts']['dead_letters_open']:
                     alerts.append('dead_letters')
+                state['unresolved_reconciliation_periods'] = store.unresolved_reconciliations(
+                    now-timedelta(days=self.settings.reconciliation_lookback_days+1))
+                if state['unresolved_reconciliation_periods']:
+                    alerts.append('unresolved_reconciliations')
                 latest = state['reconciliation']
                 if latest is None:
                     alerts.append('reconciliation_not_started')
@@ -111,6 +115,7 @@ def create_app(monitor: Monitor):
             gauge('last_run_timestamp_seconds', 'Last completed exporter cycle.',
                   worker['finished_at'].timestamp() if worker and worker['finished_at'] else None)
             latest = state['reconciliation']
+            gauge('unresolved_reconciliation_periods', 'Recent periods whose latest audit did not match.', state['unresolved_reconciliation_periods'])
             gauge('reconciliation_status', '0 missing, 1 matched, 2 mismatch, 3 incomplete.',
                   {'matched': 1, 'mismatch': 2, 'incomplete': 3}.get(latest['status'], 0) if latest else 0)
             gauge('reconciliation_completed_timestamp_seconds', 'Latest reconciliation completion.',

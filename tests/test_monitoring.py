@@ -134,3 +134,12 @@ def test_latest_report_is_newest_period_not_last_catchup(gomodel, state, lago):
     state.save_reconciliation(dict(start=DAY.isoformat(), end=END.isoformat(), status='mismatch', issues=[]))
     state.save_reconciliation(dict(start=(DAY-timedelta(days=1)).isoformat(), end=DAY.isoformat(), status='matched', issues=[]))
     assert state.latest_reconciliation()['status'] == 'mismatch'
+
+
+def test_older_unresolved_period_remains_an_alert(gomodel, state, lago):
+    ready(gomodel, state, lago)
+    state.save_reconciliation(dict(start=(DAY-timedelta(days=1)).isoformat(), end=DAY.isoformat(), status='mismatch', issues=[]))
+    snapshot = monitor().snapshot()
+    assert snapshot['reconciliation']['status'] == 'matched'
+    assert snapshot['unresolved_reconciliation_periods'] == 1
+    assert 'unresolved_reconciliations' in snapshot['alerts']

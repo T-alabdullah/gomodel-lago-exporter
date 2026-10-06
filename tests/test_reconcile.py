@@ -215,3 +215,56 @@ def test_source_failure_persists_incomplete_report(gomodel, state, lago):
     assert report['status'] == 'incomplete'
     assert 'sensitive' not in json.dumps(report)
     assert state.latest_reconciliation()['status'] == 'incomplete'
+
+
+def test_current_usage_ignores_unrelated_price_filter_bucket(gomodel, state, lago):
+    import httpx
+    insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    original = lago._handle
+    def handle(request):
+        response = original(request)
+        if request.url.path.endswith('/current_usage') and request.url.params.get('filter_by_group'):
+            body = response.json()
+            for charge in body['customer_usage']['charges_usage']:
+                charge['filters'].append({'values': {'model': ['unrelated-price-bucket']}, 'units': '900'})
+                charge['units'] = str(int(charge['units'])+900)
+            return httpx.Response(200, json=body)
+        return response
+    lago._handle = handle
+    report = make_reconciler(lago).run(DAY, END)
+    assert report['status'] == 'matched', report['issues']
+
+
+def test_recent_acknowledgement_waits_for_lago_processing(gomodel, state, lago):
+    row = insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    state._conn.execute('UPDATE event_acknowledgements SET first_ack_at = %s', (NOW-timedelta(seconds=5),))
+    del lago.stored[('sub_acme', row+':out')]
+    report = make_reconciler(lago).run(DAY, END)
+    assert report['status'] == 'incomplete'
+    assert 'recent_delivery' in codes(report)
+
+
+def test_explicit_recheck_clears_repaired_mismatch(gomodel, state, lago):
+    row = insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    event = lago.stored.pop(('sub_acme', row+':out'))
+    reconciler = make_reconciler(lago)
+    assert reconciler.run(DAY, END)['status'] == 'mismatch'
+    lago.stored[('sub_acme', row+':out')] = event
+    assert reconciler.run(DAY, END)['status'] == 'matched'
+    assert state.latest_reconciliation()['status'] == 'matched'
+
+
+def test_submillisecond_period_is_incomplete_not_inaccurate(gomodel, state, lago):
+    report = make_reconciler(lago).run(DAY+timedelta(microseconds=1), END)
+    assert report['status'] == 'incomplete'
+
+
+def test_future_billing_period_is_not_used_as_historical_evidence(gomodel, state, lago):
+    insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    lago.current_from += timedelta(days=31)
+    lago.current_to += timedelta(days=30)
+    assert make_reconciler(lago).run(DAY, END)['status'] == 'incomplete'

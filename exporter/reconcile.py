@@ -175,6 +175,9 @@ class Reconciler:
             try:
                 daily = self.audit(store, start, end)
                 report.update(issues=daily['issues'], totals=daily['totals'], excluded_rows=daily['excluded'])
+                recent = store.recent_acknowledgements(start, end, now-timedelta(seconds=self.settings.reconciliation_delay_seconds))
+                if recent:
+                    report['issues'].append(issue('recent_delivery', recent, 'Lago processing grace period is still open.', incomplete=True))
                 if end > now - timedelta(seconds=self.settings.reconciliation_delay_seconds):
                     report['issues'].append(issue('settling_window', detail='Period has not settled.', incomplete=True))
                 if start < now - timedelta(days=self.settings.source_retention_days):
@@ -211,6 +214,10 @@ class Reconciler:
             if lo < self.now() - timedelta(days=self.settings.source_retention_days):
                 report['issues'].append(issue('billing_period_retention', detail=sub['external_id'], incomplete=True))
             sub_id = sub['external_id']
+            own_rows = {rid for key, ids in evidence['rows'].items() if key[0] == sub_id for rid in ids}
+            for problem in evidence['issues']:
+                if set(problem['row_ids']) & own_rows:
+                    report['issues'].append({**problem, 'detail': 'Billing period: ' + problem['detail']})
             models = {key[1] for collection in ('source', 'ack', 'lago') for key in evidence[collection] if key[0] == sub_id}
             codes = {self.settings.metric_input: 'in', self.settings.metric_cached_input: 'cached', self.settings.metric_output: 'out'}
             billed = defaultdict(int)
@@ -233,7 +240,19 @@ class Reconciler:
                         if code in seen or charge['billable_metric']['aggregation_type'] != 'sum_agg':
                             raise EvidenceUnavailable('Unsupported billing metric/charge layout')
                         seen.add(code)
-                        billed[(sub_id, model, codes[code])] = units(charge['units'])
+                        filters = charge.get('filters', [])
+                        if filters:
+                            # Lago's group filter overrides model matching for each
+                            # price filter. Do not sum unrelated filter buckets.
+                            matches = [f for f in filters if (f.get('values') or {}).get('model') == [model]]
+                            if not matches:
+                                matches = [f for f in filters if not f.get('values')]
+                            if len(matches) != 1:
+                                raise EvidenceUnavailable('Current usage lacks an unambiguous model filter')
+                            count = units(matches[0]['units'])
+                        else:
+                            count = units(charge['units'])
+                        billed[(sub_id, model, codes[code])] = count
                     if seen != set(codes):
                         raise EvidenceUnavailable('Missing token metric charge')
             else:

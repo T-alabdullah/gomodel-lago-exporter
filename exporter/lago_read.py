@@ -87,6 +87,8 @@ class LagoReadAPI:
         raise EvidenceUnavailable('Lago pagination limit reached')
 
     def events(self, start, end, subscription=None):
+        if start.microsecond % 1000 or end.microsecond % 1000:
+            raise EvidenceUnavailable('Lago serializes event times to milliseconds; use millisecond-aligned bounds')
         params = {'timestamp_from': start.isoformat(), 'timestamp_to': end.isoformat()}
         if subscription:
             params['external_subscription_id'] = subscription
@@ -99,7 +101,7 @@ class LagoReadAPI:
                 if key in seen:
                     raise ValueError('event repeated between pages')
                 seen.add(key)
-                if start <= timestamp < end:
+                if start.replace(microsecond=(start.microsecond // 1000)*1000) <= timestamp < end:
                     events.append(event)
             except (KeyError, TypeError, ValueError) as error:
                 raise EvidenceUnavailable('Lago events malformed or unstable') from error
