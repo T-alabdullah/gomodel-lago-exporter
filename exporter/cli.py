@@ -192,15 +192,80 @@ def backfill(start: str, end: str) -> None:
     _replay(lambda runner: runner.backfill(start_time, end_time))
 
 
+def _components():
+    from exporter.lago_client import LagoClient
+    from exporter.reader import UsageReader
+    from exporter.state.store import StateStore
+    from exporter.reconcile import Reconciler
+    settings = get_settings()
+    open_store = lambda: StateStore(settings.state_db_url)
+    with open_store() as store:
+        store.init_schema()
+    reader = UsageReader(settings.gomodel_db_url)
+    client = LagoClient(settings.lago_api_url, settings.lago_api_key.get_secret_value(), settings.http_timeout_seconds)
+    return settings, open_store, reader, client, Reconciler(settings, open_store, reader, client)
+
+
 @app.command()
-def reconcile() -> None:
-    """Compare GoModel, exporter and Lago totals. (Step 10)"""
-    raise typer.Exit(_not_yet("reconcile", 10))
+def reconcile(start: str | None = None, end: str | None = None) -> None:
+    """Audit [START, END), defaulting to yesterday UTC; exit 1 unless matched."""
+    from datetime import datetime, timedelta, timezone
+    from exporter.state.store import ExporterBusyError
+    if bool(start) != bool(end):
+        raise typer.BadParameter("Provide both START and END or neither.")
+    end_time = _parse_boundary(end) if end else datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    start_time = _parse_boundary(start) if start else end_time - timedelta(days=1)
+    if start_time >= end_time:
+        raise typer.BadParameter("START must be before END.")
+    _, _, _, client, reconciler = _components()
+    try:
+        report = reconciler.run(start_time, end_time)
+        print(json.dumps(report, indent=2, default=str))
+        if report['status'] != 'matched':
+            raise typer.Exit(1)
+    except ExporterBusyError as error:
+        raise typer.Exit(_fail(str(error)))
+    finally:
+        client.close()
 
 
-def _not_yet(name: str, step: int) -> int:
-    typer.echo(f"'{name}' is not implemented yet (Step {step}).", err=True)
-    return 1
+@app.command()
+def serve() -> None:
+    """Run delivery, daily reconciliation and the status/health/metrics HTTP server."""
+    import logging
+    import threading
+    import uvicorn
+    from exporter.monitoring import Monitor, create_app
+    from exporter.runner import Runner
+    from exporter.sender import Sender
+    from exporter.scheduler import DailyScheduler
+
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s")
+    logging.getLogger('httpx').setLevel(logging.WARNING)
+    settings, open_store, reader, client, reconciler = _components()
+    stop = threading.Event()
+    runner = Runner(settings, open_store, reader, Sender(client, settings))
+    scheduler = DailyScheduler(settings, open_store, reconciler)
+    def export_loop():
+        try:
+            runner.run_forever(stop)
+        except Exception:
+            logging.exception('export worker stopped; health will report failure')
+    threads = [threading.Thread(target=export_loop, name='export', daemon=True),
+               threading.Thread(target=scheduler.run_forever, args=(stop,), name='reconcile', daemon=True)]
+    try:
+        for thread in threads:
+            thread.start()
+        uvicorn.run(create_app(Monitor(settings, open_store, reader)),
+                    host=settings.status_host, port=settings.status_port, log_level='info')
+    finally:
+        stop.set()
+        for thread in threads:
+            thread.join(timeout=5)
+        # Do not close an HTTP client underneath a worker still finishing a bounded
+        # request. A process restart safely resumes any durable pending work.
+        if not any(thread.is_alive() for thread in threads):
+            client.close()
 
 
 if __name__ == "__main__":

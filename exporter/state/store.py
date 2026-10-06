@@ -13,7 +13,7 @@ import dataclasses
 from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -109,6 +109,13 @@ class StateStore:
 
     def finish_delivery(self, row_id: str, results: list[SendResult], pending: bool) -> None:
         acknowledged = {r.event.kind.value: r.event.tokens for r in results if r.counts_as_sent}
+        for result in results:
+            if result.counts_as_sent:
+                self._conn.execute(
+                    """INSERT INTO event_acknowledgements (usage_row_id, kind, tokens)
+                       VALUES (%s, %s, %s) ON CONFLICT DO NOTHING""",
+                    (row_id, result.event.kind.value, result.event.tokens),
+                )
         errors = list(dict.fromkeys(r.error for r in results if r.error))
         self._conn.execute(
             """UPDATE deliveries SET pending = %s,
@@ -326,3 +333,86 @@ class StateStore:
             "SELECT count(*) FROM dead_letters WHERE resolved_at IS NULL"
         ).fetchone()[0]
         return counts
+
+
+    @contextmanager
+    def worker_run(self, name: str):
+        self._conn.execute(
+            """INSERT INTO worker_status (name, started_at) VALUES (%s, now())
+               ON CONFLICT (name) DO UPDATE SET started_at = now(), finished_at = NULL,
+               succeeded = NULL, last_error = NULL""", (name,),
+        )
+        report = {}
+        try:
+            yield report
+        except BaseException as error:
+            self._conn.execute(
+                "UPDATE worker_status SET finished_at = now(), succeeded = FALSE, last_error = %s WHERE name = %s",
+                (type(error).__name__, name),
+            )
+            raise
+        else:
+            self._conn.execute(
+                """UPDATE worker_status SET finished_at = now(), succeeded = TRUE,
+                   report = %s WHERE name = %s""", (json.dumps(report, default=str), name),
+            )
+
+    def reconciliation_records(self, start: datetime, end: datetime) -> dict[str, dict]:
+        # A repeatable-read snapshot makes the two local tables agree. The writer
+        # lock held by reconciliation prevents exports changing them during the audit.
+        records = {}
+        for row_id, status, sub, ts, model, provider, inp, cached, out in self._conn.execute(
+            """SELECT usage_row_id, status, external_subscription_id, usage_timestamp,
+                      model, provider_name, input_tokens_sent, cached_input_tokens_sent,
+                      output_tokens_sent FROM usage_rows
+               WHERE usage_timestamp >= %s AND usage_timestamp < %s""", (start, end),
+        ).fetchall():
+            records[str(row_id)] = dict(status=status, subscription_id=sub, timestamp=ts,
+                model=model, provider=provider, acknowledged=dict(zip(('in', 'cached', 'out'), (inp, cached, out))))
+        for row_id, payload, pending, ack in self._conn.execute(
+            """SELECT usage_row_id, payload, pending, acknowledged FROM deliveries
+               WHERE (payload->'row'->>'timestamp')::timestamptz >= %s
+                 AND (payload->'row'->>'timestamp')::timestamptz < %s""", (start, end),
+        ).fetchall():
+            record = records.setdefault(str(row_id), {})
+            record.update(delivery=Delivery.from_dict(payload), pending=pending, acknowledged=ack)
+        return records
+
+    def save_reconciliation(self, report: dict) -> int:
+        return self._conn.execute(
+            """INSERT INTO reconciliation_runs (period_start, period_end, status, report)
+               VALUES (%s, %s, %s, %s) RETURNING id""",
+            (report['start'], report['end'], report['status'], json.dumps(report, default=str)),
+        ).fetchone()[0]
+
+    def latest_reconciliation(self) -> dict | None:
+        row = self._conn.execute(
+            "SELECT id, completed_at, report FROM reconciliation_runs ORDER BY period_end DESC, id DESC LIMIT 1",
+        ).fetchone()
+        return dict(id=row[0], completed_at=row[1], **row[2]) if row else None
+
+    def reconciliation_for_period(self, start, end):
+        return self._conn.execute(
+            """SELECT completed_at, status FROM reconciliation_runs WHERE period_start = %s
+               AND period_end = %s ORDER BY id DESC LIMIT 1""", (start, end),
+        ).fetchone()
+
+    def monitoring_snapshot(self, now: datetime) -> dict:
+        workers = {}
+        for name, started, finished, succeeded, error, report in self._conn.execute(
+            "SELECT name, started_at, finished_at, succeeded, last_error, report FROM worker_status",
+        ).fetchall():
+            workers[name] = dict(started_at=started, finished_at=finished, succeeded=succeeded,
+                                 error=error, report=report)
+        pending, oldest = self._conn.execute(
+            """SELECT count(*), min((payload->'row'->>'timestamp')::timestamptz)
+               FROM deliveries WHERE pending""",
+        ).fetchone()
+        start = now.astimezone(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        acknowledged_today = self._conn.execute(
+            "SELECT count(*) FROM event_acknowledgements WHERE first_ack_at >= %s AND first_ack_at <= %s",
+            (start, now),
+        ).fetchone()[0]
+        return dict(counts=self.status_counts(), workers=workers, pending=pending,
+                    oldest_pending=oldest, events_acknowledged_today=acknowledged_today,
+                    dead_letters=self.open_dead_letters(), reconciliation=self.latest_reconciliation())

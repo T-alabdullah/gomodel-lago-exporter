@@ -60,7 +60,7 @@ def state(_databases):
     """A fresh, empty exporter state database."""
     with StateStore(_url(STATE_DB)) as s:
         s.init_schema()
-        s._conn.execute("TRUNCATE export_cursor, usage_rows, dead_letters, deliveries")
+        s._conn.execute("TRUNCATE export_cursor, usage_rows, dead_letters, deliveries, event_acknowledgements, worker_status, reconciliation_runs")
         yield s
 
 
