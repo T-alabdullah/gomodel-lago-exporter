@@ -26,3 +26,27 @@ def test_missing_subscription_cannot_supply_billing_evidence():
     lago = ReadFakeLago()
     with pytest.raises(EvidenceUnavailable):
         LagoReadAPI(lago.client(), settings()).subscription('missing')
+
+
+@pytest.mark.parametrize('rows,total,current,next_page,valid', [
+    ([], 0, 0, None, True), ([], 0, 1, None, True),
+    ([{}], 1, 0, None, False), ([], 1, 0, None, False),
+    ([], 0, 0, 2, False),
+])
+def test_real_lago_empty_pagination(rows, total, current, next_page, valid):
+    from exporter.config import Settings
+    from exporter.lago_client import LagoClient
+    from exporter.lago_read import LagoReadAPI, EvidenceUnavailable
+    import httpx
+    client = LagoClient('http://test', 'key', transport=httpx.MockTransport(lambda req:
+        httpx.Response(200, json={'events': rows, 'meta': {'current_page': current,
+            'next_page': next_page, 'total_count': total}})))
+    api = LagoReadAPI(client, Settings())
+    try:
+        if valid:
+            assert list(api.pages('/api/v1/events', 'events', {})) == []
+        else:
+            with pytest.raises(EvidenceUnavailable):
+                list(api.pages('/api/v1/events', 'events', {}))
+    finally:
+        client.close()

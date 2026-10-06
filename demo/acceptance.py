@@ -113,8 +113,9 @@ def main():
 
     compose('start', 'exporter')
     compose('stop', 'lago-api')
+    outage_started = time.monotonic()
     rows += traffic(5, ghost=False)
-    eventually(lambda: probe('snapshot-local')['pending'] > 0) if False else time.sleep(8)
+    time.sleep(max(0, 10-(time.monotonic()-outage_started)))
     # Read persisted state directly; Lago is deliberately inaccessible.
     sql = "SELECT count(*) FROM deliveries WHERE pending"
     pending = compose('exec', '-T', 'exporter-db', 'psql', '-U', 'postgres', '-d', 'exporter', '-Atc', sql).stdout.strip()
