@@ -268,3 +268,28 @@ def test_future_billing_period_is_not_used_as_historical_evidence(gomodel, state
     lago.current_from += timedelta(days=31)
     lago.current_to += timedelta(days=30)
     assert make_reconciler(lago).run(DAY, END)['status'] == 'incomplete'
+
+
+def test_day_spanning_two_billing_periods_compares_each_scope(gomodel, state, lago):
+    insert(gomodel, T0-timedelta(hours=1))
+    make_runner(lago).run_cycle()
+    lago.current_from = DAY
+    lago.current_to = T0
+    period = lago.client()._http.get('/api/v1/customers/acme/current_usage', params={'external_subscription_id': 'sub_acme'}).json()['customer_usage']
+    lago.past_periods = [period]
+    lago.current_from, lago.current_to = T0, END
+    insert(gomodel, T0+timedelta(hours=1))
+    make_runner(lago).run_cycle()
+    report = make_reconciler(lago, reconciliation_page_size=1).run(DAY, END)
+    assert report['status'] == 'matched', report['issues']
+    assert len(report['billing_periods']) == 2
+    assert {p['evidence'] for p in report['billing_periods']} == {'past', 'current'}
+
+
+def test_ambiguous_overlapping_historical_periods_are_incomplete(gomodel, state, lago):
+    insert(gomodel, T0)
+    make_runner(lago).run_cycle()
+    period = lago.client()._http.get('/api/v1/customers/acme/current_usage', params={'external_subscription_id': 'sub_acme'}).json()['customer_usage']
+    lago.past_periods = [period, deepcopy(period)]
+    lago.terminated['sub_acme'] = lago.subscriptions.pop('sub_acme')
+    assert make_reconciler(lago).run(DAY, END)['status'] == 'incomplete'

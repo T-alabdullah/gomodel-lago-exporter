@@ -101,6 +101,9 @@ def create_app(monitor: Monitor):
             if value is not None:
                 Gauge('exporter_' + name, description, registry=registry).set(value)
         gauge('healthy', 'Readiness including billing alerts.', int(state['healthy']))
+        alerts_metric = Gauge('exporter_alert', 'Active operational alert by reason.', ['reason'], registry=registry)
+        for reason in state['alerts']:
+            alerts_metric.labels(reason=reason).set(1)
         gauge('database_available', 'Both databases were reachable.', int(state['database_available']))
         if state['database_available']:
             gauge('cursor_lag_seconds', 'Now minus cursor; idle traffic also increases this.', state['cursor_lag_seconds'])
@@ -138,19 +141,34 @@ def create_app(monitor: Monitor):
                           for row in state.get('dead_letters', []))
         latest = state.get('reconciliation')
         reconciliation = escape(json.dumps(jsonable_encoder(latest), indent=2)) if latest else 'No reconciliation report yet.'
-        alerts = ', '.join(state['alerts']) or 'No active alerts'
+        labels = {
+            'exporter_not_started': 'Exporter has not started', 'exporter_stale': 'Exporter heartbeat is stale',
+            'exporter_error': 'Last export run failed', 'billing_lag': 'Billing lag exceeds the configured limit',
+            'dead_letters': 'Usage needs attention in dead letters', 'database_unavailable': 'Database unavailable',
+            'reconciliation_not_started': 'Reconciliation has not run', 'reconciliation_stale': 'Reconciliation is overdue',
+            'reconciliation_mismatch': 'Reconciliation found mismatches', 'reconciliation_incomplete': 'Reconciliation evidence is incomplete',
+            'unresolved_reconciliations': 'Earlier reconciliation periods need attention',
+            'backlog_scan_incomplete': 'Backlog scan reached its limit',
+        }
+        alerts = '; '.join(labels.get(key, key) for key in state['alerts']) or 'Healthy — no active alerts'
+        recon_summary = ''
+        if latest:
+            problems = ''.join(f'<li><strong>{escape(item["code"].replace("_", " "))}</strong>: {escape(item["detail"])} '
+                               f'{escape(", ".join(item["row_ids"]))}</li>' for item in latest.get('issues', [])[:100])
+            recon_summary = f'<p><strong>{escape(latest["status"].capitalize())}</strong> · {escape(latest["start"])} to {escape(latest["end"])} (end excluded)</p><ul>{problems}</ul>'
+        alert_color = '#e7f3eb' if state['healthy'] else '#fff0e7'
         return f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="refresh" content="30"><title>Usage exporter status</title><style>
 body{{font:16px system-ui;margin:40px auto;padding:0 20px;max-width:1100px;background:#f5f7fa;color:#182230}}
 h1{{font-size:30px}}h2{{font-size:16px}}.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}}
 article{{background:white;padding:16px;border:1px solid #d4dae2;border-radius:8px}}article p{{font-size:21px;overflow-wrap:anywhere}}
-table{{border-collapse:collapse;width:100%;background:white}}th,td{{text-align:left;padding:12px;border:1px solid #d4dae2;overflow-wrap:anywhere}}
-pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:20px;border:1px solid #d4dae2}}.alert{{padding:14px;background:#e7edf5}}
+table{{border-collapse:collapse;width:100%;background:white;table-layout:fixed}}th:nth-child(1){{width:40%}}th:nth-child(2){{width:23%}}th:nth-child(3){{width:37%}}th,td{{text-align:left;padding:12px;border:1px solid #d4dae2;overflow-wrap:anywhere}}
+pre{{white-space:pre-wrap;overflow-wrap:anywhere;background:white;padding:20px;border:1px solid #d4dae2}}.alert{{padding:14px;background:{alert_color};border-left:4px solid #8b5d37}}
 </style></head><body><h1>GoModel → Lago usage exporter</h1><p class="alert">{escape(alerts)}</p>
 <p>Updated {escape(state['now'].isoformat())}. Refreshes every 30 seconds.</p><div class="grid">{cards}</div>
 <p>Cursor lag grows during idle periods. Billing-lag alerts use outstanding usage instead.
 Events today counts unique acknowledgements, including recovered duplicates, not HTTP attempts.</p>
 <h2>Open dead letters (latest 100)</h2><table><thead><tr><th>Usage row</th><th>Reason</th><th>Error</th></tr></thead><tbody>{letters}</tbody></table>
-<h2>Latest reconciliation</h2><pre>{reconciliation}</pre><p><a href="/status">JSON status</a> · <a href="/metrics">Prometheus metrics</a> · <a href="/health">Health</a></p></body></html>'''
+<h2>Latest reconciliation</h2>{recon_summary}<details><summary>Full reconciliation report</summary><pre>{reconciliation}</pre></details><p><a href="/status">JSON status</a> · <a href="/metrics">Prometheus metrics</a> · <a href="/health">Health</a></p></body></html>'''
 
     return app

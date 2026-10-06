@@ -143,3 +143,12 @@ def test_older_unresolved_period_remains_an_alert(gomodel, state, lago):
     assert snapshot['reconciliation']['status'] == 'matched'
     assert snapshot['unresolved_reconciliation_periods'] == 1
     assert 'unresolved_reconciliations' in snapshot['alerts']
+
+
+def test_metrics_parse_and_include_active_alerts(gomodel, state, lago):
+    from prometheus_client.parser import text_string_to_metric_families
+    insert(gomodel, T0, key='ghost')
+    make_runner(lago).run_cycle()
+    with TestClient(create_app(monitor())) as client:
+        families = list(text_string_to_metric_families(client.get('/metrics').text))
+    assert any(f.name == 'exporter_alert' and any(s.labels.get('reason') == 'dead_letters' and s.value == 1 for s in f.samples) for f in families)

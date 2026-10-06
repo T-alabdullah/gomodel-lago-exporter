@@ -1,5 +1,7 @@
 """Exact-range event audit plus independently scoped Lago billing-period checks."""
 
+import logging
+
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
@@ -9,6 +11,8 @@ from exporter.lago_read import EvidenceUnavailable, LagoReadAPI, instant, period
 from exporter.mapper import map_row
 from exporter.state.store import Cursor
 
+
+log = logging.getLogger(__name__)
 
 def issue(code, rows=(), detail='', *, incomplete=False):
     return dict(code=code, row_ids=sorted(set(rows)), detail=detail, incomplete=incomplete)
@@ -202,11 +206,17 @@ class Reconciler:
                 report['status'] = 'incomplete'
             report['id'] = store.save_reconciliation(report)
             heartbeat.update(status=report['status'], reconciliation_id=report['id'])
+            log.log(logging.INFO if report['status'] == 'matched' else logging.WARNING,
+                    'reconciliation %s: %s (%d issues), period %s to %s', report['id'],
+                    report['status'], len(report['issues']), report['start'], report['end'])
         return report
 
     def check_billing(self, store, sub, start, end, report):
         periods = self.api.billing_periods(sub, start, end)
         covered = []
+        bounds = sorted(period_bounds(period) for _, period in periods)
+        if any(right[0] < left[1] for left, right in zip(bounds, bounds[1:])):
+            raise EvidenceUnavailable('Overlapping Lago billing periods require review')
         for mode, period in periods:
             lo, hi = period_bounds(period)
             covered.append((max(start, lo), min(end, hi)))
@@ -260,6 +270,8 @@ class Reconciler:
                     code = charge['billable_metric']['code']
                     if code not in codes:
                         continue
+                    if charge['billable_metric']['aggregation_type'] != 'sum_agg':
+                        raise EvidenceUnavailable('Historical charge is not a sum metric')
                     filters = charge.get('filters', [])
                     accounted = 0
                     for item in filters:
