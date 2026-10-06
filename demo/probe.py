@@ -61,6 +61,7 @@ def main(action):
                 assert row.raw_data.get('prompt_cached_tokens') == cached, row.raw_data
             return {'verified_source_rows': len(source)}
         if action == 'audit':
+            end = (now-timedelta(seconds=settings.reconciliation_delay_seconds+1)).replace(microsecond=0)
             return reconciler.run(start, end)
         if action == 'cycle':
             return vars(runner.run_cycle())

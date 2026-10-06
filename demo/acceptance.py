@@ -61,7 +61,7 @@ def drained(expected_rows):
 
 
 def audit_matched():
-    time.sleep(3)
+    time.sleep(4)
     report = probe('audit')
     assert report['status'] == 'matched', report
     assert report['billing_periods'], 'No real billing-period comparison ran'
@@ -82,6 +82,7 @@ def main():
     assert snap['dead_letters'] == snap['unmapped'], snap
     probe('verify')
     compose('stop', 'exporter')
+    time.sleep(4)
     report = probe('audit')
     assert report['status'] == 'mismatch' and any(i['code'] == 'unmapped' for i in report['issues']), report
     record('mixed-traffic-streaming-cache-and-unmapped', requests=rows, snapshot=snap)
