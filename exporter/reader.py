@@ -45,6 +45,7 @@ class UsageReader:
         position: Cursor | None,
         limit: int,
         until: datetime | None = None,
+        since: datetime | None = None,
     ) -> list[UsageRow]:
         """Up to `limit` rows strictly after `position`, oldest first.
 
@@ -58,6 +59,9 @@ class UsageReader:
         if until is not None:
             conditions.append("timestamp < %(until)s")
             params["until"] = until
+        if since is not None:
+            conditions.append("timestamp >= %(since)s")
+            params["since"] = since
         where = "WHERE " + " AND ".join(conditions) if conditions else ""
 
         query = f"SELECT {COLUMNS} FROM usage {where} ORDER BY timestamp, id LIMIT %(limit)s"
@@ -65,6 +69,15 @@ class UsageReader:
         # the next read simply reconnects.
         with psycopg.connect(self._dsn, autocommit=True, connect_timeout=10) as conn:
             return [_to_usage_row(r) for r in conn.execute(query, params).fetchall()]
+
+    def find_by_id_prefix(self, prefix: str) -> list[UsageRow]:
+        """At most two matches, across the entire table; prefix validated by CLI."""
+        with psycopg.connect(self._dsn, autocommit=True, connect_timeout=10) as conn:
+            rows = conn.execute(
+                f"SELECT {COLUMNS} FROM usage WHERE id::text LIKE %s ORDER BY id LIMIT 2",
+                (prefix + "%",),
+            ).fetchall()
+        return [_to_usage_row(row) for row in rows]
 
 
 def _to_usage_row(r: tuple) -> UsageRow:

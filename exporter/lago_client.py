@@ -15,6 +15,7 @@ Lago behaviour this relies on (checked in lago-api for Lago v1.53.0):
 """
 
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -53,7 +54,7 @@ class LagoClient:
 
     def get_subscription(self, external_id: str) -> httpx.Response:
         """200 if an ACTIVE subscription has this id, 404 otherwise."""
-        return self._checked(self._http.get(f"/api/v1/subscriptions/{external_id}"))
+        return self._checked(self._http.get(f"/api/v1/subscriptions/{quote(external_id, safe='')}"))
 
     @staticmethod
     def _checked(response: httpx.Response) -> httpx.Response:
@@ -85,7 +86,7 @@ def is_duplicate(details: Any) -> bool:
     return (
         isinstance(details, dict)
         and set(details) == {"transaction_id"}
-        and "value_already_exist" in (details.get("transaction_id") or [])
+        and details.get("transaction_id") == ["value_already_exist"]
     )
 
 

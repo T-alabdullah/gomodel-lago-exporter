@@ -20,12 +20,14 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 
 from exporter.config import Settings
 from exporter.contracts import (
     MappingOutcome, MappingResult, RowStatus, SendOutcome, SendResult, UsageRow,
 )
 from exporter.events import build_events
+from exporter.delivery import Delivery
 from exporter.lago_client import LagoAuthError
 from exporter.mapper import map_row
 from exporter.reader import UsageReader, overlap_start
@@ -91,8 +93,15 @@ class Runner:
 
     def run_cycle(self) -> CycleReport:
         report = CycleReport()
-        with self._open_store() as store:
+        with self._open_store() as store, store.writer_lock():
             report.cursor = store.get_cursor()
+            # Pending payloads survive source deletion and moving overlap windows.
+            pending_position = None
+            while pending := store.pending_deliveries(self._settings.read_batch_size, pending_position):
+                if self._process_page(store, [d.row for d in pending], report,
+                                      force=True, advance=False):
+                    return report
+                pending_position = pending[-1].row.id
             position = overlap_start(report.cursor, self._settings.overlap_window_seconds)
             while rows := self._reader.read_after(position, self._settings.read_batch_size):
                 must_stop = self._process_page(store, rows, report)
@@ -102,16 +111,56 @@ class Runner:
             report.cursor = store.get_cursor()
         return report
 
-    def _process_page(self, store: StateStore, rows: list[UsageRow], report: CycleReport) -> bool:
+    def backfill(self, start: datetime, end: datetime) -> CycleReport:
+        """Replay [start, end), keeping the polling cursor completely unchanged."""
+        if start.tzinfo is None or end.tzinfo is None or start >= end:
+            raise ValueError("Backfill requires timezone-aware start < end.")
+        report = CycleReport()
+        with self._open_store() as store, store.writer_lock():
+            report.cursor = store.get_cursor()
+            position = None
+            while rows := self._reader.read_after(position, self._settings.read_batch_size,
+                                                 since=start, until=end):
+                if self._process_page(store, rows, report, force=True, advance=False):
+                    break
+                position = Cursor(rows[-1].timestamp, rows[-1].id)
+        return report
+
+    def send_row(self, row: UsageRow) -> CycleReport:
+        """Replay one row through the same durable path as polling and backfill."""
+        report = CycleReport()
+        with self._open_store() as store, store.writer_lock():
+            report.cursor = store.get_cursor()
+            self._process_page(store, [row], report, force=True, advance=False)
+        return report
+
+    def _process_page(self, store: StateStore, rows: list[UsageRow], report: CycleReport,
+                      *, force: bool = False, advance: bool = True) -> bool:
         """Handle one page of rows. Returns True if the cycle must stop (retry later)."""
         report.rows_read += len(rows)
-        known = store.statuses(r.id for r in rows)
+        known = {} if force else store.statuses(r.id for r in rows)
         report.rows_skipped += len(known)
         new_rows = [r for r in rows if r.id not in known]
 
-        mappings = {r.id: map_row(r, self._settings) for r in new_rows}
-        events = [e for m in mappings.values() if m.outcome is MappingOutcome.MAPPED
-                  for e in build_events(m, self._settings)]
+        mappings = {}
+        events = []
+        # This transaction MUST commit before HTTP. It pins the subscription,
+        # token split, metric codes and timestamp even if a later send crashes.
+        with store.transaction():
+            for row in new_rows:
+                delivery = store.get_delivery(row.id)
+                if delivery is None:
+                    mapping = store.legacy_mapping(map_row(row, self._settings))
+                    if mapping.outcome is MappingOutcome.MAPPED:
+                        row_events = store.legacy_events(
+                            row.id, build_events(mapping, self._settings, include_zero=True),
+                        )
+                        delivery = Delivery(mapping.row, mapping.external_subscription_id, row_events)
+                if delivery is not None:
+                    delivery = store.prepare_delivery(delivery)
+                    mapping = MappingResult(delivery.row, MappingOutcome.MAPPED, delivery.subscription_id)
+                    events.extend(delivery.events)
+                mappings[row.id] = mapping
         results: dict[str, list[SendResult]] = defaultdict(list)
         for result in (self._sender.send(events) if events else []):
             results[result.event.usage_row_id].append(result)
@@ -123,13 +172,15 @@ class Runner:
                 if row.id in known:
                     pass                    # handled before
                 elif self._needs_retry(results[row.id]):
+                    store.finish_delivery(row.id, results[row.id], pending=True)
                     report.waiting_for_retry += 1
                     must_stop = True        # leave it unrecorded; don't move past it
                 else:
+                    store.finish_delivery(row.id, results[row.id], pending=False)
                     self._record(store, mappings[row.id], results[row.id], report)
                 if not must_stop:
                     cursor_target = Cursor(row.timestamp, row.id)
-            if cursor_target:
+            if cursor_target and advance:
                 store.advance_cursor(cursor_target)
         return must_stop
 
@@ -152,7 +203,7 @@ class Runner:
             log.warning("unmapped usage row %s: %s", row.id, mapping.reason)
             return
 
-        tokens_sent = {r.event.kind: r.event.tokens for r in results if r.counts_as_sent}
+        tokens_sent = store.acknowledged_tokens(row.id)
         errors = [r.error for r in results if r.outcome is SendOutcome.REJECTED]
         sub = mapping.external_subscription_id
         if errors:

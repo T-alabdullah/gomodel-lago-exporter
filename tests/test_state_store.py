@@ -43,7 +43,7 @@ def _test_database():
 def store(_test_database):
     s = StateStore(_test_db_url())
     s.init_schema()
-    s._conn.execute("TRUNCATE export_cursor, usage_rows, dead_letters")
+    s._conn.execute("TRUNCATE export_cursor, usage_rows, dead_letters, deliveries")
     yield s
     s.close()
 

@@ -89,9 +89,16 @@ class Sender:
         if cached is not None and self._now() - cached[1] < SUBSCRIPTION_CACHE_SECONDS:
             return cached[0]
         response = self._with_retries(lambda: self._client.get_subscription(sub_id))
-        if response.status_code != 200:
+        if response.status_code == 404:
             return None    # not cached: a newly created subscription is picked up next time
-        started_at = datetime.fromisoformat(response.json()["subscription"]["started_at"])
+        if response.status_code != 200:
+            raise RetriesExhausted(f"unexpected subscription response HTTP {response.status_code}")
+        try:
+            started_at = datetime.fromisoformat(response.json()["subscription"]["started_at"])
+            if started_at.tzinfo is None:
+                raise ValueError("started_at has no timezone")
+        except (ValueError, TypeError, KeyError) as err:
+            raise RetriesExhausted("invalid subscription response; cannot verify billing period") from err
         self._active_subscriptions[sub_id] = (started_at, self._now())
         return started_at
 
