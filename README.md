@@ -172,3 +172,10 @@ CI acceptance job boots from empty volumes and uploads evidence and logs.
 [Step 1 validation](docs/step-1-validation.md) · [Step 2 design](docs/step-2-design.md).
 `HANDOVER.md` records the teammate's original implementation and commands; this README
 and the current runbooks supersede its setup instructions.
+# Interactive local Llama lab
+
+For a browser demo with real Llama inference, request tracing, database inspection,
+Lago evidence, replay/failure controls and reconciliation, run
+`python3 scripts/run_live.py` and open `http://localhost:8090`.
+See [the lab guide](docs/live-lab.md) for the guided experiment and runtime details.
+For a fresh Windows machine, follow the [copy-paste Windows setup guide](docs/live-lab-windows.md).

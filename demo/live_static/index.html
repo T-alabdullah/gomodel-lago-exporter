@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Llama Usage Lab</title><link rel="stylesheet" href="/static/style.css"><script defer src="/static/app.js"></script></head>
+<body>
+<aside class="sidebar">
+  <a class="brand" href="/"><span class="mark">L</span><span>Usage Lab<small>GoModel × Lago</small></span></a>
+  <div class="sidebar-label">WORKSPACE</div>
+  <nav aria-label="Workspace tabs">
+    <button data-tab="chat" class="active"><span>◈</span> Live chat</button>
+    <button data-tab="trace"><span>⌁</span> Request trace</button>
+    <button data-tab="databases"><span>▤</span> Databases</button>
+    <button data-tab="lago"><span>◇</span> Lago billing</button>
+    <button data-tab="audit"><span>◎</span> Reconciliation</button>
+    <button data-tab="settings"><span>⚙</span> Settings & controls</button>
+  </nav>
+  <div class="sidebar-label recent-label">RECENT REQUESTS <button id="refresh-history" title="Refresh requests">↻</button></div>
+  <div id="history" class="history"><p>No requests yet.</p></div>
+  <div class="sidebar-foot"><span class="dot"></span> Local environment<small>Real inference. Real database rows.</small></div>
+</aside>
+<main>
+  <header><div><span class="eyebrow">DEVELOPER PLAYGROUND</span><h1 id="page-title">Follow every token.</h1></div><div class="header-right"><div id="services" class="services">Checking services…</div><span id="mode-badge" class="badge amber">Delivery paused</span></div></header>
+  <div id="error-banner" class="error-banner" hidden></div>
+  <div class="overview"><div><span>MODEL</span><strong>Llama 3.2 <em>1B · local</em></strong></div><div><span>EXPORTER</span><strong id="exporter-mode">Paused</strong></div><div><span>PENDING DELIVERIES</span><strong id="pending-count">—</strong></div><div><span>ACKNOWLEDGED TODAY</span><strong id="ack-count">—</strong></div><div><span>OPEN DEAD LETTERS</span><strong id="dead-count">—</strong></div></div>
+
+  <div class="request-picker"><label for="selected-request">INSPECT A REQUEST</label><select id="selected-request"><option value="">Select a recorded request…</option></select></div>
+  <section id="tab-chat" class="tab-panel active">
+    <div class="section-intro"><h2>A conversation, with the receipts.</h2><p>Send a prompt to a real local Llama model. Follow its usage from GoModel to Lago.</p></div>
+    <div class="chat-grid"><div class="panel chat-panel">
+      <div class="panel-heading"><div><span class="dot"></span> Llama 3.2<span class="muted"> / 1B</span></div><span class="small">Streaming through GoModel</span></div>
+      <div id="conversation" class="conversation"><div class="empty-chat"><span class="llama-symbol">λ</span><h3>Make the pipeline visible.</h3><p>Ask a question. Then inspect the actual records it creates.</p><div class="suggestions"><button data-prompt="Explain why retrying a billing event should not charge a customer twice. Keep it brief.">Explain safe retries ↗</button><button data-prompt="Write a short, friendly welcome message for a developer exploring this demo.">Write a welcome ↗</button></div></div></div>
+      <form id="chat-form"><div class="request-options"><label>Customer<select id="customer"><option value="acme">Acme · label mapping</option><option value="beta">Beta · user path</option><option value="ghost">Ghost · unmapped</option></select></label><label>Provider<select id="provider"><option value="ollama-qai">ollama-qai · billable</option><option value="ollama-ext">ollama-ext · excluded</option></select></label></div><label class="sr-only" for="prompt">Prompt</label><textarea id="prompt" required maxlength="4000" placeholder="Ask Llama something…" rows="3"></textarea><div class="composer-footer"><span>Each send is an independent request · <span id="token-limit-label">160</span> max output tokens</span><button id="send" class="primary" type="submit">Send request <span>↗</span></button></div></form>
+    </div><div class="chat-side"><div class="panel"><div class="panel-heading">Pipeline, live <span id="trace-short" class="mono small">Awaiting request</span></div><div id="pipeline" class="pipeline"></div><div class="panel-note">Stages reflect observed evidence. Cached input can be zero with local Llama.</div></div><div class="panel"><div class="panel-heading">Inspect one boundary at a time</div><p class="panel-copy">Delivery starts paused. Generate a response, freeze its payload, then deliver it to Lago.</p><div class="action-stack"><button data-action="prepare">1. Prepare frozen delivery</button><button data-action="replay" class="primary">2. Deliver / replay</button><button data-tab="trace">3. Inspect request trace →</button></div><p class="panel-note">Replay keeps the same transaction IDs. Lago deduplicates existing events.</p></div></div></div>
+  </section>
+
+  <section id="tab-trace" class="tab-panel">
+    <div class="section-intro"><h2>One request. Every boundary.</h2><p id="selected-description">Select a request from the sidebar or send a new message.</p></div>
+    <div class="toolbar"><button data-action="prepare">Prepare only</button><button data-action="replay" class="primary">Deliver / replay</button><button data-action="reconcile">Reconcile this interval</button><button id="refresh-trace">Refresh evidence ↻</button></div>
+    <div id="trace-summary" class="trace-summary"></div>
+    <div id="trace-content" class="evidence-grid"><div class="panel empty">Your selected request’s HTTP payload, source row, delivery and events will appear here.</div></div>
+  </section>
+
+  <section id="tab-databases" class="tab-panel">
+    <div class="section-intro"><h2>The actual rows.</h2><p>Read-only views of the two PostgreSQL databases. Select a row to inspect its full JSON.</p></div>
+    <div class="toolbar"><label>Database<select id="db"><option value="source">GoModel · source</option><option value="state">Exporter · state</option></select></label><label>Table<select id="table"><option>usage</option></select></label><label class="grow">Filter visible rows<input id="db-filter" placeholder="UUID, model, subscription or status"></label><button id="filter-selected">Use selected usage UUID</button><button id="refresh-db">Refresh ↻</button></div>
+    <div class="panel"><div class="panel-heading"><span id="db-title">GoModel / usage</span><span class="badge">SELECT only</span></div><div id="db-query" class="query mono"></div><div id="db-table" class="table-wrap"></div></div>
+    <div class="evidence-grid"><div class="panel"><div class="panel-heading">Selected row</div><pre id="db-row">Select a table row above.</pre></div><div class="panel"><div class="panel-heading">Table schema</div><div id="db-schema" class="table-wrap"></div></div></div>
+  </section>
+
+  <section id="tab-lago" class="tab-panel">
+    <div class="section-intro"><h2>What Lago actually received.</h2><p>Live public-API evidence: stored events, subscriptions, metric definitions and billed token units.</p></div><div class="toolbar"><button id="refresh-lago">Refresh Lago ↻</button><span class="muted">Demo USD package prices; currency amounts round up per million-token package.</span></div><div id="lago-content" class="evidence-grid"></div>
+  </section>
+
+  <section id="tab-audit" class="tab-panel">
+    <div class="section-intro"><h2>Verify all three accounts agree.</h2><p>Compare source usage, exporter acknowledgements and Lago evidence. Audits also check the enclosing billing period.</p></div><div class="toolbar"><button data-action="reconcile" class="primary">Reconcile selected request interval</button><button id="refresh-audit">Refresh saved reports ↻</button></div><div class="notice">An unmapped request is a real discrepancy. An unavailable API is incomplete evidence. Neither is shown as a successful audit.</div><div id="audit-content" class="evidence-grid"></div>
+  </section>
+
+  <section id="tab-settings" class="tab-panel">
+    <div class="section-intro"><h2>Control the experiment.</h2><p>Pause at a boundary, observe durable state, and resume the real delivery path.</p></div>
+    <div class="evidence-grid"><div class="panel"><div class="panel-heading">Exporter controls</div><div class="control-row"><div><strong>Automatic delivery</strong><p>Poll GoModel every 2 seconds and run daily reconciliation.</p></div><button id="toggle-auto" class="primary">Resume</button></div><div class="control-row"><div><strong>Delivery network fault</strong><p>Route only the lab sender to an unavailable endpoint. GoModel and Lago remain running.</p></div><button id="toggle-fault">Enable fault</button></div><div class="action-stack"><button id="cycle">Run one polling cycle</button></div><p class="panel-note">Pause waits for an active cycle to finish. Settings persist across lab restarts.</p></div><div class="panel"><div class="panel-heading">Generation settings</div><div class="form-fields"><label>Maximum output tokens<input id="max-tokens" type="number" min="8" max="512" value="160"></label><label>Temperature<input id="temperature" type="number" min="0" max="1.5" step="0.1" value="0.5"></label><p>Applies to the next request. The model runs locally on CPU; first use may take longer while weights load.</p></div></div></div>
+    <div class="evidence-grid"><div class="panel"><div class="panel-heading">Effective settings · secrets omitted</div><pre id="settings-json"></pre></div><div class="panel"><div class="panel-heading">Monitoring & latest cycle</div><pre id="status-json"></pre></div></div>
+  </section>
+  <footer><span>GoModel → PostgreSQL → Exporter → Lago</span><span id="updated">Connecting…</span></footer>
+</main><div id="toast" role="status" hidden></div>
+</body></html>

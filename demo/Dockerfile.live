@@ -1,0 +1,6 @@
+FROM gomodel-exporter:local
+USER root
+COPY demo /app/demo
+RUN mkdir -p /home/exporter/live-data && chown -R exporter:exporter /home/exporter/live-data
+USER exporter
+CMD ["uvicorn", "demo.live_app:app", "--host", "0.0.0.0", "--port", "8090"]
