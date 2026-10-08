@@ -46,6 +46,19 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+  live-reset:
+    image: gomodel-exporter:live
+    user: root
+    command: [python, -m, demo.live_reset]
+    environment:
+      LIVE_DATA_DIR: /home/exporter/live-data
+      LIVE_COMPOSE_PROJECT: ${COMPOSE_PROJECT_NAME:-gomodel-lago-exporter}
+      GOMODEL_ADMIN_DB_URL: postgresql://postgres:${GOMODEL_PASSWORD:?}@gomodel-db:5432/gomodel
+      READONLY_PASSWORD: ${READONLY_PASSWORD:?}
+    volumes:
+      - live-history:/home/exporter/live-data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
 volumes:
   live-models:
   live-history:

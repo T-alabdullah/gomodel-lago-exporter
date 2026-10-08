@@ -69,8 +69,24 @@ local actions. This is a single-user developer lab; do not expose it publicly.
 
 ## Stop / return to deterministic demo
 
+**Fresh start:** Settings includes **Fresh start · clear all demo data**. Confirming
+it clears every source usage row, exporter delivery/acknowledgement/dead-letter
+record, cursor, audit report, chat history, and the local Lago billing database
+and queued jobs. It restarts services and reprovisions the configured demo pricing,
+Acme/Beta customers and subscriptions. Delivery starts paused with fault injection
+off. Credentials and downloaded Llama weights are retained. Wait for active
+inference to finish before resetting; the UI reconnects when the reset completes.
+
+The optional `live-reset` helper has no published port and is the only lab service
+with a Docker socket mount (privileged access to the local Docker engine). It runs
+fixed reset operations against containers in this Compose project. The web app
+queues requests through the shared history volume and retains its read-only source
+database access. Do not use this reset helper with production data. If a reset
+fails, rerun `python3 scripts/run_live.py` and retry the button; progress is saved
+in the history volume. Merely starting the demo never clears data.
+
 ```sh
-docker compose --env-file .env.demo -f docker-compose.yml -f docker-compose.live.yml stop live-lab ollama
+docker compose --env-file .env.demo -f docker-compose.yml -f docker-compose.live.yml stop live-lab live-reset ollama
 docker compose --env-file .env.demo up -d --no-deps gomodel
 ```
 

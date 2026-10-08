@@ -31,7 +31,7 @@ def main():
     env['GOMODEL_ADMIN_DB_URL'] = 'postgresql://postgres:' + values['GOMODEL_PASSWORD'] + '@gomodel-db:5432/gomodel'
     run(*COMPOSE, 'run', '--rm', '--no-deps', '-e', 'GOMODEL_ADMIN_DB_URL', '-e', 'READONLY_PASSWORD',
         'live-lab', 'python', '-m', 'demo.live_setup', env=env)
-    run(*COMPOSE, 'up', '-d', '--no-deps', '--wait', 'live-lab')
+    run(*COMPOSE, 'up', '-d', '--no-deps', '--wait', 'live-lab', 'live-reset')
     print('\nOpen http://localhost:8090\nDelivery starts paused on first launch. Settings persist on restart.')
 
 

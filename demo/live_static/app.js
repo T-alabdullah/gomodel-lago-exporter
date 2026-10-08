@@ -1,6 +1,7 @@
 const $ = id => document.getElementById(id);
 let selected = new URLSearchParams(location.search).get('request') || localStorage.getItem('lab-selected'), activeTab = 'chat', traceData = null, requests = [], dbData = null;
 let controls = {paused:true, network_fault:false}, busy = false, polling = false, lastAnswer = '';
+let resetting = false;
 const text = (tag, value, cls) => { const e=document.createElement(tag); e.textContent=value; if(cls)e.className=cls; return e; };
 const pretty = value => JSON.stringify(value, null, 2);
 const short = value => value ? value.slice(0,8) : '—';
@@ -58,5 +59,26 @@ async function loadAudit(){try{const d=await api('/api/database/state/reconcilia
 async function setControl(next){try{controls=await api('/api/control',next);updateControls();await loadSettings();notify(controls.paused?'Automatic delivery paused.':'Automatic delivery resumed.');}catch(e){notify(e.message,true);}}
 $('toggle-auto').addEventListener('click',()=>setControl({...controls,paused:!controls.paused}));$('toggle-fault').addEventListener('click',()=>setControl({...controls,network_fault:!controls.network_fault}));$('cycle').addEventListener('click',async()=>{try{notify((await api('/api/cycle',{})).summary);await loadTrace();await loadStatus();}catch(e){notify(e.message,true);}});
 $('refresh-history').addEventListener('click',()=>loadHistory().catch(e=>notify(e.message,true)));$('refresh-trace').addEventListener('click',loadTrace);$('refresh-db').addEventListener('click',loadDB);$('refresh-lago').addEventListener('click',loadLago);$('refresh-audit').addEventListener('click',loadAudit);$('max-tokens').addEventListener('change',()=>$('token-limit-label').textContent=$('max-tokens').value);
-async function poll(){if(polling||document.hidden)return;polling=true;try{await Promise.all([loadTrace(),loadStatus(),loadHistory()]);if(activeTab==='databases')await loadDB();}catch(e){$('updated').textContent='Connection interrupted · retrying';}finally{polling=false;}}
+async function watchReset(){
+  resetting=true;$('fresh-start').disabled=true;
+  notify('Fresh start in progress. Services will restart; this can take several minutes.');
+  const timer=setInterval(async()=>{try{
+    const result=await api('/api/reset');
+    $('fresh-start').textContent=result.message||'Resetting…';
+    if(result.state==='complete'){
+      clearInterval(timer);localStorage.removeItem('lab-selected');
+      const url=new URL(location.href);url.searchParams.delete('request');location.replace(url.href);
+    }else if(result.state==='failed'){
+      clearInterval(timer);resetting=false;$('fresh-start').disabled=false;
+      $('fresh-start').textContent='Fresh start · clear all demo data';notify(result.message,true);
+    }
+  }catch(e){$('fresh-start').textContent='Restarting services…';}},3000);
+}
+$('fresh-start').addEventListener('click',async()=>{
+  if(!confirm('Permanently clear ALL demo requests, source usage, deliveries, acknowledgements, dead letters, audit reports, and Lago billing data? Demo pricing will be restored, delivery paused, and fault injection turned off. The downloaded model and credentials are kept.'))return;
+  $('fresh-start').disabled=true;
+  try{await api('/api/reset',{});watchReset();}catch(e){$('fresh-start').disabled=false;notify(e.message,true);}
+});
+api('/api/reset').then(r=>{if(r.state==='queued'||r.state==='running')watchReset();}).catch(()=>{});
+async function poll(){if(resetting||polling||document.hidden)return;polling=true;try{await Promise.all([loadTrace(),loadStatus(),loadHistory()]);if(activeTab==='databases')await loadDB();}catch(e){$('updated').textContent='Connection interrupted · retrying';}finally{polling=false;}}
 loadSettings();loadServices();renderPipeline(null);poll();setInterval(poll,1800);setInterval(loadServices,15000);

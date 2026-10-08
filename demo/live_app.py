@@ -33,6 +33,7 @@ from exporter.reader import UsageReader, _to_usage_row, COLUMNS
 from exporter.reconcile import Reconciler
 from exporter.runner import Runner
 from exporter.scheduler import DailyScheduler
+from demo.live_reset import DATA as RESET_DATA, write_status as reset_status
 from exporter.sender import Sender
 from exporter.state.store import StateStore, ExporterBusyError
 
@@ -292,6 +293,9 @@ async def local_write_guard(request, call_next):
             return JSONResponse({'detail': 'Cross-origin write blocked'}, status_code=403)
         if request.headers.get('x-lab-action') != '1':
             return JSONResponse({'detail': 'Missing local action header'}, status_code=403)
+        progress = RESET_DATA / 'reset-status.json'
+        if progress.exists() and json.loads(progress.read_text()).get('state') in ('queued', 'running'):
+            return JSONResponse({'detail': 'Fresh start is in progress.'}, status_code=409)
     response = await call_next(request)
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -361,6 +365,8 @@ def requests(request: Request):
 @app.post('/api/requests', status_code=202)
 async def chat(body: ChatInput, request: Request):
     lab = request.app.state.lab
+    if getattr(lab, 'resetting', False):
+        raise HTTPException(409, 'Fresh start is in progress.')
     if len(lab.tasks) >= 3:
         raise HTTPException(429, 'Three requests already queued; wait for inference to finish.')
     record = {'id': str(uuid4()), 'created_at': now().isoformat(), 'status': 'queued',
@@ -433,6 +439,29 @@ def control(body: ControlInput, request: Request):
 @app.post('/api/cycle')
 def cycle(request: Request):
     return request.app.state.lab.run()
+
+
+@app.get('/api/reset')
+def reset_progress():
+    path = RESET_DATA / 'reset-status.json'
+    return json.loads(path.read_text()) if path.exists() else {'state': 'idle'}
+
+
+@app.post('/api/reset', status_code=202)
+async def fresh_start(request: Request):
+    lab = request.app.state.lab
+    if lab.tasks:
+        raise HTTPException(409, 'Wait for all queued and generating requests to finish before clearing the demo.')
+    heartbeat = RESET_DATA / 'reset-heartbeat'
+    if not heartbeat.exists() or time.time() - heartbeat.stat().st_mtime > 10:
+        raise HTTPException(503, 'Reset helper is unavailable. Run python3 scripts/run_live.py to start it.')
+    with lab.guard:
+        lab.resetting = True
+        lab.control = {'paused': True, 'network_fault': False}
+        lab.history.controls(lab.control)
+        reset_status('queued', 'Starting fresh demo…')
+        (RESET_DATA / 'reset-request').touch()
+    return {'state': 'queued'}
 
 
 TABLES = {'source': ('usage',), 'state': ('deliveries', 'usage_rows', 'event_acknowledgements',
